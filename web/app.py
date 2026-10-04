@@ -2980,6 +2980,32 @@ def api_messages():
                     "matched": len(shown), "q": q, "per_topic": PER_TOPIC})
 
 
+def await_reply(info, ticket, timeout=5):
+    """The reply to a control publish, or the broker's refusal of it.
+
+    **The refusal and the reply race, and either one is the answer.** A
+    refused request never produces a reply - the refusal rides the PUBACK -
+    so waiting for a reply and calling the silence a timeout reports "the
+    broker is slow" about a broker that said no at once. Every verb that
+    waits for a reply waits here, so none of them can forget the PUBACK.
+
+    Returns (reply, None), (None, reason code) for a refusal, or
+    (None, None) when neither came within the timeout.
+    """
+    deadline = time.time() + timeout
+    rc = None
+    while time.time() < deadline:
+        with lock:
+            reply = seeks.pop(ticket, None)
+            rc = pubacks.pop(info.mid, rc)
+        if reply is not None:
+            return reply, None
+        if rc is not None and int(getattr(rc, "value", rc)) >= 0x80:
+            return None, rc
+        time.sleep(0.05)
+    return None, None
+
+
 def point_read(topic, timeout=5):
     """The current value of one topic, to a caller that does not subscribe.
 
@@ -3006,18 +3032,14 @@ def point_read(topic, timeout=5):
         info.wait_for_publish(timeout)
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return None, f"{type(e).__name__}: {e}"
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        with lock:
-            reply = seeks.pop(ticket, None)
-        if reply is not None:
-            return reply, None
-        time.sleep(0.05)
-    # A refused read is answered on the PUBACK and never on the Response
-    # Topic, so nothing arriving is what a refusal looks like from here.
-    return None, ("no answer within 5s - the broker refuses a read whose key names "
-                  "no `latest` channel, holds a wildcard, or is in a reserved space, "
-                  "and that refusal rides the PUBACK rather than the reply")
+    reply, refused = await_reply(info, ticket, timeout)
+    if reply is not None:
+        return reply, None
+    if refused is not None:
+        return None, (f"the broker refused the read: {refused} - it refuses a key that "
+                      f"names no `latest` channel, holds a wildcard, or is in a reserved "
+                      f"space, and a read the acl_file does not grant")
+    return None, f"no answer within {timeout}s"
 
 
 def compiled_message(topic, text):
@@ -4098,17 +4120,22 @@ def api_seek():
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        with lock:
-            reply = seeks.pop(ticket, None)
-        if reply is not None:
-            return jsonify({"ok": True, "reply": reply, "position": position,
-                            "channel": channel})
-        time.sleep(0.05)
-    rc = getattr(info, "rc", None)
+    reply, refused = await_reply(info, ticket)
+    if reply is not None:
+        return jsonify({"ok": True, "reply": reply, "position": position,
+                        "channel": channel})
+    if refused is not None:
+        code = int(getattr(refused, "value", refused))
+        error = f"the broker refused it: {refused}"
+        if code == 0x87:
+            # One overwhelmingly likely cause, so say it.
+            error += (f" - seeking {channel} takes `seek` on that channel in the "
+                      f"acl_file; check with `saguin --acl <config> "
+                      f"{MQTT_CFG['username'] or '<user>'}`")
+        return jsonify({"ok": False, "channel": channel, "position": position,
+                        "error": error}), 403 if code == 0x87 else 502
     return jsonify({"ok": False, "channel": channel, "position": position,
-                    "error": "no reply within 5s" + (f"; PUBACK reason {rc}" if rc else "")}), 504
+                    "error": "no reply within 5s"}), 504
 
 
 @app.get("/api/sessions")
@@ -4186,24 +4213,11 @@ def api_disconnect():
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
-    # **The refusal and the reply race, and either one is the answer.** A
-    # refused request never produces a reply, so waiting for one and calling
-    # the silence a timeout reports "the broker is slow" about a broker that
-    # said no immediately.
-    deadline = time.time() + 5
-    rc = None
-    while time.time() < deadline:
-        with lock:
-            reply = seeks.pop(ticket, None)
-            rc = pubacks.pop(info.mid, rc)
-        if reply is not None:
-            return jsonify({"ok": True, "client_id": client_id, "reply": reply,
-                            "hung_up": reply == "hung-up"})
-        if rc is not None and int(getattr(rc, "value", rc)) >= 0x80:
-            break
-        time.sleep(0.05)
-
-    if rc is not None and int(getattr(rc, "value", rc)) >= 0x80:
+    reply, rc = await_reply(info, ticket)
+    if reply is not None:
+        return jsonify({"ok": True, "client_id": client_id, "reply": reply,
+                        "hung_up": reply == "hung-up"})
+    if rc is not None:
         code = int(getattr(rc, "value", rc))
         out = {"ok": False, "client_id": client_id,
                "error": f"the broker refused it: {rc}"}
