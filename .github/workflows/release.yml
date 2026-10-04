@@ -64,6 +64,13 @@ jobs:
           fi
           echo "building ${{ steps.tags.outputs.tag }} at $(git rev-parse --short HEAD)"
 
+      # **Both platforms, because the broker ships both.** saguin's image runs on
+      # a Raspberry Pi or an arm64 gateway, and a viewer that does not leaves the
+      # broker there without one. arm64 is built and started under QEMU on this
+      # amd64 runner.
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@v4
 
       # **Built and started before it is pushed, and that is the whole shape of
@@ -71,36 +78,59 @@ jobs:
       # stayed broken for a day, because its Dockerfile enumerates what it copies
       # and nobody extended the list, so nothing noticed. A suite can hold the
       # Dockerfile to the configuration beside it, and one does; only running the thing catches the rest.
-      - name: build it, into this runner rather than the registry
+      #
+      # One build per platform, because `load` holds one platform: a single
+      # multi-platform build could only go straight to the registry, untested.
+      - name: build it for amd64, into this runner rather than the registry
         uses: docker/build-push-action@v7
         with:
           context: .
           file: web/Dockerfile
+          platforms: linux/amd64
           load: true
           push: false
-          tags: saguin-viewer:under-test
+          tags: saguin-viewer:under-test-amd64
 
-      - name: start it and ask it for a page
+      - name: build it for arm64, into this runner rather than the registry
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: web/Dockerfile
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: saguin-viewer:under-test-arm64
+
+      - name: start each and ask it for a page
         run: |
-          # No broker: the viewer starts, serves the page, and says it is not
-          # connected. Which is the point - a container that cannot start is the
-          # failure this step is for, and it needs no broker to show itself.
-          docker run -d --name under-test -p 8080:8080 \
-            -e SAGUIN_VIEWER_LISTEN=0.0.0.0:8080 saguin-viewer:under-test
-          for i in $(seq 1 60); do
-            if curl -sf -o /dev/null http://127.0.0.1:8080/; then
-              echo "it serves a page"; break
-            fi
-            if [ "$i" = "60" ]; then
-              echo "::error::the image did not serve a page in 30s"
-              docker logs under-test
-              exit 1
-            fi
-            sleep 0.5
-          done
-          # And the dashboards its configuration names are in it, which is the
-          # exact line that was missing when it broke.
-          docker exec under-test python3 -c "
+          set -eu
+          for arch in amd64 arm64; do
+            # No broker: the viewer starts, serves the page, and says it is not
+            # connected. Which is the point - a container that cannot start is the
+            # failure this step is for, and it needs no broker to show itself.
+            docker run -d --platform "linux/$arch" --name "under-test-$arch" -p 8080:8080 \
+              -e SAGUIN_VIEWER_LISTEN=0.0.0.0:8080 "saguin-viewer:under-test-$arch"
+            # It is the platform it says it is, not a fallback to the runner's own.
+            got=$(docker exec "under-test-$arch" uname -m)
+            case "$arch:$got" in
+              amd64:x86_64|arm64:aarch64) ;;
+              *) echo "::error::the $arch image runs as $got"; exit 1 ;;
+            esac
+            # 120 s rather than 30: arm64 starts under emulation.
+            for i in $(seq 1 240); do
+              if curl -sf -o /dev/null http://127.0.0.1:8080/; then
+                echo "the $arch image serves a page"; break
+              fi
+              if [ "$i" = "240" ]; then
+                echo "::error::the $arch image did not serve a page in 120s"
+                docker logs "under-test-$arch"
+                exit 1
+              fi
+              sleep 0.5
+            done
+            # And the dashboards its configuration names are in it, which is the
+            # exact line that was missing when it broke.
+            docker exec "under-test-$arch" python3 -c "
           import sys, yaml
           cfg = yaml.safe_load(open('/viewer/saguin-viewer.yaml'))
           import pathlib
@@ -108,8 +138,9 @@ jobs:
                      if p != 'builtin' and not pathlib.Path('/viewer', p).exists()]
           sys.exit('dashboards named by the configuration and not in the image: '
                    + repr(missing) if missing else 0)"
-          echo "every dashboard its configuration names is in the image"
-          docker rm -f under-test
+            echo "every dashboard its configuration names is in the $arch image"
+            docker rm -f "under-test-$arch"
+          done
 
       - uses: docker/login-action@v4
         with:
@@ -117,23 +148,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # **The image that was tested is the image that is pushed**, by tagging the
-      # one already in this runner's daemon rather than building a second time.
-      # A second `build-push-action` was very likely identical on a warm cache,
-      # and "very likely" is not what a release gate is for: one cache miss
-      # between the two builds - a base image's digest moving mid-run is enough -
-      # and the bytes that ship are bytes nothing started, fetched a page from, or
-      # counted the dashboards inside.
+      # **The images that were tested are the images that are pushed**, by
+      # tagging the ones already in this runner's daemon rather than building a
+      # second time. A second `build-push-action` was very likely identical on a
+      # warm cache, and "very likely" is not what a release gate is for: one cache
+      # miss between the two builds - a base image's digest moving mid-run is
+      # enough - and the bytes that ship are bytes nothing started, fetched a page
+      # from, or counted the dashboards inside.
+      #
+      # Each platform goes up under its own tag, `<version>-amd64` and
+      # `<version>-arm64`, and the version and `latest` are then one index naming
+      # those two manifests: `imagetools create` copies references, it builds
+      # nothing.
       #
       # **The version and `latest` both.** A stack that wants reproducibility pins
       # the version; one that wants the current viewer follows `latest`, which is
       # what saguin's demos did when they built from source.
-      - name: push the image that was tested
+      - name: push the images that were tested
+        env:
+          image: ghcr.io/ifnesi/saguin-viewer
+          version: ${{ steps.tags.outputs.version }}
         run: |
           set -eu
-          id=$(docker image inspect -f '{{.Id}}' saguin-viewer:under-test)
-          echo "pushing the image the gate ran: $id"
-          for t in "${{ steps.tags.outputs.version }}" latest; do
-            docker tag saguin-viewer:under-test "ghcr.io/ifnesi/saguin-viewer:$t"
-            docker push "ghcr.io/ifnesi/saguin-viewer:$t"
+          for arch in amd64 arm64; do
+            id=$(docker image inspect -f '{{.Id}}' "saguin-viewer:under-test-$arch")
+            echo "pushing the $arch image the gate ran: $id"
+            docker tag "saguin-viewer:under-test-$arch" "$image:$version-$arch"
+            docker push "$image:$version-$arch"
           done
+          docker buildx imagetools create -t "$image:$version" -t "$image:latest" \
+            "$image:$version-amd64" "$image:$version-arm64"
+          # And the index is what it should be: exactly these two platforms.
+          got=$(docker buildx imagetools inspect --raw "$image:$version" |
+            python3 -c "import json, sys; print(' '.join(sorted(m['platform']['os'] + '/' + m['platform']['architecture'] for m in json.load(sys.stdin)['manifests'] if m['platform']['os'] != 'unknown')))")
+          if [ "$got" != "linux/amd64 linux/arm64" ]; then
+            echo "::error::$image:$version names $got, not linux/amd64 linux/arm64"
+            exit 1
+          fi
+          echo "$image:$version and latest name linux/amd64 and linux/arm64"
