@@ -1,0 +1,82 @@
+# queues.yaml - work handed to one worker at a time, and what became of it.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the queue families. Every card here is summed
+# across queues; the breakdowns beside them say which queue, and the `queues`
+# widget at the foot gives each one its own row.
+
+title: "Queues"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Work in flight
+      A queue record is **leased**, not sent: one worker holds it, and the lease returns on an acknowledgement, on a timeout, or when the worker's connection ends. So `delivered` counts hand-outs rather than jobs - a job redelivered after a timeout is counted twice, on purpose.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Depth",     metric: saguin_queue_depth,    sparkline: true,
+      note: "Waiting to be handed out, across every queue" }
+  - { type: stat, width: 3, title: "In flight", metric: saguin_queue_inflight, sparkline: true,
+      note: "Leased to a worker right now and not yet acknowledged" }
+  - { type: stat, width: 3, title: "Delivered", metric: saguin_queue_delivered_total }
+  - { type: stat, width: 3, title: "Acknowledged", metric: saguin_queue_acknowledged_total }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Depth",
+      metric: saguin_queue_depth, color: series-1 }
+  - { type: timeseries, width: 6, height: medium, title: "In flight",
+      metric: saguin_queue_inflight, color: series-2 }
+
+  - { type: break }
+  - type: heading
+    text: "Work that went round again, or did not come back"
+
+  - { type: break }
+  # **Three ways a lease ends without an acknowledgement**, and they are
+  # different faults. Returned is a worker saying "not me" - deliberate, and
+  # cheap. Expired is a lease that ran out with nobody answering, which is a
+  # worker that died or a visibility timeout set too short. Dead-lettered is
+  # the end of the road: the attempts ran out, and the job is on the __dlq
+  # channel waiting for somebody to look at it.
+  - { type: stat, width: 3, title: "Returned",      metric: saguin_queue_returned_total }
+  - { type: stat, width: 3, title: "Redelivered",   metric: saguin_queue_redelivered_total, alarm: "> 0" }
+  - { type: stat, width: 3, title: "Expired leases", metric: saguin_queue_expired_total,    alarm: "> 0" }
+  - { type: stat, width: 3, title: "Dead-lettered", metric: saguin_queue_dead_lettered_total, alarm: "> 0" }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Dead-lettered, by queue",
+      metric: saguin_queue_dead_lettered_total, by: queue, severity: critical }
+  - { type: breakdown, width: 6, height: medium, title: "Redelivered, by queue",
+      metric: saguin_queue_redelivered_total, by: queue, severity: warning }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Expired, by queue",
+      metric: saguin_queue_expired_total, by: queue, severity: warning }
+  - { type: breakdown, width: 6, height: medium, title: "Returned, by queue",
+      metric: saguin_queue_returned_total, by: queue }
+
+  - { type: break }
+  - { type: breakdown, width: 4, height: medium, title: "Delivered, by queue",
+      metric: saguin_queue_delivered_total, by: queue }
+  - { type: breakdown, width: 4, height: medium, title: "Acknowledged, by queue",
+      metric: saguin_queue_acknowledged_total, by: queue }
+  - { type: breakdown, width: 4, height: medium, title: "In flight, by queue",
+      metric: saguin_queue_inflight, by: queue }
+
+  - { type: break }
+  # **Not a fault, and it is here so that it is not read as one.** A producer
+  # set RETAIN on a topic a queue claims. A queue holds work rather than state
+  # and grants no subscription a retained message could be delivered to, so the
+  # flag is dropped and the publish is acknowledged like any other - nothing on
+  # the wire says so, and this is the only place it is visible. It rises when
+  # somebody believes they are setting state on a topic a queue's `filter`
+  # caught, which is a question about that filter.
+  - { type: stat, width: 3, title: "Retain flags ignored", metric: saguin_queue_retain_ignored_total,
+      note: "A producer setting state on a topic a queue claims - its filter is the thing to look at, not the broker" }
+  - { type: breakdown, width: 9, height: medium, title: "Retain flags ignored, by queue",
+      metric: saguin_queue_retain_ignored_total, by: queue }
+
+  - { type: break }
+  - { type: queues, width: 12 }

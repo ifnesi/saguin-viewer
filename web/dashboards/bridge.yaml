@@ -1,0 +1,80 @@
+# bridge.yaml - the links this broker holds to other brokers.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the bridge families. What is held on this broker
+# is on Storage; the message path is on Traffic.
+#
+# **A bridge carries in both directions, and this broker is always the end
+# that dials.** It subscribes at the peer and writes what arrives into
+# whatever channel the topic lands in, and it reads channels here and
+# publishes them there - so the numbers below are about a link this broker
+# dials and nothing about a link anybody dials to it. A bridge that is down is a metric and never a failed
+# health probe: the far end being unreachable is a real thing to know and the
+# worst possible thing to restart this broker for, since a restart cannot fix
+# somebody else's broker.
+#
+# No card here names a bridge, so this file runs against any broker. The
+# splits are over every link there is.
+
+title: "Bridges"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Links to other brokers
+      **Up** counts the links connected right now; **stopped** counts the ones that gave up rather than the ones retrying, which is the distinction worth having at three in the morning - a bridge retrying is a far end that is down, and a bridge stopped is one this broker will not dial again without a restart. `records taken` is what arrived through them; `records sent` is what went the other way.
+
+      **`Records not sent` is what an outbound rule did not send the peer**, every cause added up: the peer refused it for good, the peer refused a broadcast record, the rule could build no topic for it, a broadcast record was dropped because the rule's queue was full, or a `latest` value was replaced by a newer one for its topic while it waited to cross. The last is not a loss - the newer one crosses - and says a link ran behind. The broker splits them by `cause`.
+
+      **`Records not stored` is what arrived from the peer and was not kept**, every cause added up, each a record the peer was told was finished: the peer sent a topic no inbound rule covers, a rule could build no topic for it or only one in the reserved `$` space, saguin would refuse the record whatever the channel, or a QoS 0 record was dropped because the bridge's queue was full behind a channel that was not taking what it was given - at-most-once, as its publisher asked. The first three are the bridge's configuration or the peer's traffic, and each is logged; the broker splits them by `cause`.
+
+      **Read `loops skipped` beside `records sent` or not at all.** A bridge that is connected, sending nothing and skipping everything looks on `records sent` alone exactly like a bridge with nothing to send, and the two want opposite actions. Skips climbing is a topology somebody built - two brokers pointed at each other - where the guard is working and the records are going nowhere.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Bridges up",      metric: saguin_bridge_connected }
+  - { type: stat, width: 3, title: "Bridges stopped", metric: saguin_bridge_stopped, alarm: "> 0",
+      note: "A bridge that gave up rather than one that is retrying" }
+  - { type: stat, width: 3, title: "Records taken",   metric: saguin_bridge_received_total }
+  - { type: stat, width: 3, title: "Records sent",    metric: saguin_bridge_sent_total }
+  - { type: stat, width: 3, title: "Records not sent", metric: saguin_bridge_unsent_total,
+      note: "Every cause added up, a superseded latest value among them" }
+  - { type: stat, width: 3, title: "Records not stored", metric: saguin_bridge_unstored_total,
+      note: "Every cause added up: no rule, unmappable, never accepted, queue full" }
+  - { type: stat, width: 3, title: "Reconnects",      metric: saguin_bridge_reconnects_total,
+      note: "A number that climbs on a link that reads 'up' is a far end dropping it" }
+
+  - { type: break }
+  - type: heading
+    text: "Which link, and how much"
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Records taken, by bridge",
+      metric: saguin_bridge_received_total, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Reconnects, by bridge",
+      metric: saguin_bridge_reconnects_total, by: bridge, severity: warning }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Records sent, by bridge",
+      metric: saguin_bridge_sent_total, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Loops skipped, by bridge",
+      metric: saguin_bridge_loops_skipped_total, by: bridge, severity: warning }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Records not sent, by bridge",
+      metric: saguin_bridge_unsent_total, by: bridge, severity: warning }
+  - { type: breakdown, width: 6, height: medium, title: "Records not stored, by bridge",
+      metric: saguin_bridge_unstored_total, by: bridge, severity: warning }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Connected, by bridge",
+      metric: saguin_bridge_connected, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Stopped, by bridge",
+      metric: saguin_bridge_stopped, by: bridge, severity: critical }
+
+  - { type: break }
+  # The table says where each one dials and what it has taken, with the
+  # peer address the configuration gave it - which is the one fact none of
+  # the cards above can carry, because it is a label rather than a number.
+  - { type: bridges, width: 12 }

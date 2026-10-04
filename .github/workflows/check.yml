@@ -1,0 +1,147 @@
+# Both viewers' suites, run on a machine that is not the author's.
+#
+# **Two jobs rather than one, because there are two viewers.** They share no code
+# and no dependencies, so a failure in one should not make the other's contributor
+# read a log about a toolchain they do not have - and the Actions page tells the
+# two apart without opening either.
+#
+# **This exists before saguin's own `viewer` job is deleted**, which is the point:
+# for the whole of that suite's life in saguin's tree, nothing ran it but a person
+# typing the command, and the cost was concrete - the container image stopped
+# starting the day dashboards arrived and stayed broken for a day, because nothing
+# drove it. Stripping the viewer out of
+# saguin before this existed would have re-created exactly that gap.
+name: check
+
+# **No `paths-ignore` for Markdown, which is where this diverges from saguin's
+# workflow on purpose.** Several cases here read a README as their subject: the
+# flags the CLI's README documents, the card fields the web viewer's README lists,
+# the dashboard examples in both, and the metric count written out in prose. A
+# documentation-only change can break them, so a documentation-only change has to
+# run them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The terminal viewer: Go, two dependencies.
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: false
+
+      # **The broker some cases drive, from saguin's own repository.** Tried
+      # rather than required: if the clone fails, the cases that need a real
+      # broker skip, and the summary below says so.
+      - name: saguin, if it can be reached
+        id: saguin
+        continue-on-error: true
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: git clone --depth 1 https://github.com/ifnesi/saguin.git saguin
+
+      - name: the broker binary those cases start
+        if: steps.saguin.outcome == 'success'
+        run: |
+          cd saguin && go build -o bin/saguin ./cmd/saguin
+          echo "SAGUIN_REPO=$GITHUB_WORKSPACE/saguin" >> "$GITHUB_ENV"
+
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./... -count=1
+
+      # **What skipped, said out loud on the Actions page.** A suite that skipped
+      # its broker-driven cases is green and is not the same run as one that did
+      # not, and nothing else here would say which happened.
+      - name: what this run covered
+        if: always()
+        run: |
+          if [ "${{ steps.saguin.outcome }}" = "success" ]; then
+            echo "The Go suite ran against a real saguin broker." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**saguin could not be cloned, so the cases that need a real" \
+                 "broker skipped:** the parser against a real scrape, both" \
+                 "credential arrangements on the operations listener, the shipped" \
+                 "dashboard against a live broker, and the broker's" \
+                 "min_scrape_interval. The run above counts them." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The browser viewer: Python, and node to drive its JavaScript directly.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Go only for the broker binary two of its cases drive; the web viewer needs
+      # no Go of its own.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: false
+
+      # As in the `cli` job above: tried rather than required.
+      - name: saguin, if it can be reached
+        id: saguin
+        continue-on-error: true
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: git clone --depth 1 https://github.com/ifnesi/saguin.git saguin
+
+      - name: the broker binary those cases drive
+        if: steps.saguin.outcome == 'success'
+        run: |
+          cd saguin && go build -o bin/saguin ./cmd/saguin
+          echo "SAGUIN_REPO=$GITHUB_WORKSPACE/saguin" >> "$GITHUB_ENV"
+
+      - name: the virtual environment the suite needs
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --disable-pip-version-check -q -r web/requirements.txt
+
+      # `make viewer` rather than the command copied out of it, so the two cannot
+      # drift - and the target is held by a case in the suite to having no pipe
+      # after it, because a pipe there once threw the suite's own exit away and
+      # left this job green over a red suite.
+      - run: make viewer
+
+      - name: what this run covered
+        if: always()
+        run: |
+          if [ "${{ steps.saguin.outcome }}" = "success" ]; then
+            echo "The web suite ran against a real saguin broker, so the drift" \
+                 "check between RFC 0005's catalogue, that broker's scrape," \
+                 "ALLOWED_METRICS and the shipped dashboards ran." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**saguin could not be cloned, so the cases that need it" \
+                 "skipped** - the run above counts each one, which it did not" \
+                 "until the skip moved off setUpClass. They are the drift check" \
+                 "against RFC 0005 and a live broker, and the topic-to-channel" \
+                 "comparison against \`saguin --route\`. The drift check is the" \
+                 "one that matters most here: it is what stops the viewers'" \
+                 "metric list disagreeing with the broker's catalogue." \
+                 >> "$GITHUB_STEP_SUMMARY"
+          fi

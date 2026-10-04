@@ -1,0 +1,33 @@
+# HELP saguin_build_info Always 1. This is where saguin's own version is stated.
+# TYPE saguin_build_info gauge
+saguin_build_info{version="0.1.0",broker_id="edge-1"} 1
+# HELP saguin_uptime_seconds How long this process has been running.
+# TYPE saguin_uptime_seconds gauge
+saguin_uptime_seconds 63.6040226
+# HELP saguin_connections Clients connected now.
+# TYPE saguin_connections gauge
+saguin_connections 1
+# HELP saguin_connections_by_protocol Connected now, by MQTT version.
+# TYPE saguin_connections_by_protocol gauge
+saguin_connections_by_protocol{protocol="5"} 1
+saguin_connections_by_protocol{protocol="3.1.1"} 0
+# HELP saguin_channel_info Always 1. Carries the filter as written, `iot/+/{status,location}/+` included - and "type".
+# TYPE saguin_channel_info gauge
+saguin_channel_info{channel="events",filter="iot/+/events/+",type="append",provider="mem"} 1
+saguin_channel_info{channel="state",filter="iot/+/{status,location}/+",type="latest",provider="mem"} 1
+saguin_channel_info{channel="jobs",filter="iot/+/work/+",type="queue",provider="mem"} 1
+# HELP saguin_channel_bytes Bytes an append or queue channel holds.
+# TYPE saguin_channel_bytes gauge
+saguin_channel_bytes{channel="events"} 348
+saguin_channel_bytes{channel="jobs"} 162
+# HELP saguin_channel_records Records a channel holds.
+# TYPE saguin_channel_records gauge
+saguin_channel_records{channel="events"} 6
+saguin_channel_records{channel="jobs"} 3
+# HELP saguin_publish_refused_total Publishes refused, by the MQTT reason code answered.
+# TYPE saguin_publish_refused_total counter
+saguin_publish_refused_total{reason="retain not supported"} 1
+# HELP saguin_escapes_probe Not a saguin metric. The three escapes the format defines on a label value, an empty value, and a backslash before anything else.
+# TYPE saguin_escapes_probe gauge
+saguin_escapes_probe{quote="a\"b",backslash="a\\b",newline="a\nb",empty="",other="a\tb"} 0
+saguin_escapes_probe{unlabelled_neighbour="yes"} -1.5

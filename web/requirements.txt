@@ -1,0 +1,42 @@
+# The web viewer's Python environment.
+#
+# **Its own file rather than the one it used to share.** In saguin's tree the
+# viewer installed from examples/requirements.txt, which the guided tour also
+# read - one file, because one virtualenv served both. The tour stayed there
+# and the viewer came here, so a shared file would now be a dependency on
+# another repository: the pins and the reasons for them are below instead.
+
+# Eclipse Paho's Python client, which the viewer uses as an MQTT client - it
+# reads records through the broker's front door like any other client, and the
+# properties it shows (Correlation Data, Response Topic, User Properties,
+# Session Expiry) are MQTT 5.
+#
+# **Both protocol versions come from that one package**, which is most of why
+# the viewer is Python. Every Go MQTT client picks a side - paho.golang is
+# MQTT 5 only and paho.mqtt.golang is 3.1.1 only - so a viewer offering both
+# would carry two libraries and an interface over them.
+#
+# Pinned exactly; paho 2.0 changed the callback signatures, so a bump is a decision.
+paho-mqtt==2.1.0
+
+# A Flask application serving static React, and one configuration file.
+Flask==3.1.3
+PyYAML==6.0.3
+
+# **Reading a payload through its registered schema.**
+#
+# The viewer shows a schema with neither of these installed - that is a point
+# read of a `latest` channel and needs no toolchain. Reading a *payload* with
+# one needs a deserializer per format: protoc, which arrives as grpcio-tools,
+# and fastavro, which is pure Python. Both are here rather than left to the
+# reader, because a schema registry whose deserializing is an optional extra
+# is a feature somebody discovers is missing after publishing against it.
+#
+# The viewer still degrades honestly where one is absent - it names the
+# missing package and shows the bytes - but nothing here ships that way: the
+# container image installs this file, which is what moved its base off
+# Alpine. grpcio-tools publishes manylinux wheels and no musl ones, so on
+# Alpine it compiled protoc from source for about ten minutes; the Dockerfile
+# beside this file carries that trade and what it costs.
+grpcio-tools==1.84.0
+fastavro==1.12.2

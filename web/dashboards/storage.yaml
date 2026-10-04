@@ -1,0 +1,93 @@
+# storage.yaml - what the broker is holding, and where it is kept.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the channel and provider families: how many
+# records each channel holds, and how full each store is. The links to other
+# brokers have a tab of their own.
+#
+# **No card here names a provider, a channel, a queue or a bridge**, so this
+# file runs against any broker. Where saguin labels a metric per store, the
+# card is a split rather than a value: a split is over every one of them, and
+# a shipped dashboard naming one would draw an empty card on every broker but
+# the one it was written against.
+
+title: "Storage"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # What is held, and where
+      A channel's `records` is what it is keeping now, after retention has taken what it may. `floor` is the oldest offset still readable and `next` is where the following write lands - a consumer below the floor has lost its place and is counted as such.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Records held",  metric: saguin_channel_records, sparkline: false }
+  - { type: stat, width: 3, title: "Bytes held",    metric: saguin_channel_bytes, format: bytes }
+  - { type: stat, width: 3, title: "Consumers",     metric: saguin_channel_consumers }
+  - { type: stat, width: 3, title: "Positions lost", metric: saguin_channel_position_lost_total, alarm: "> 0",
+      note: "A stored position that fell below the floor - records that reader never read are gone. It counts occurrences rather than readers, so 'Who lost records' in the sidebar is where the names are" }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Records, by channel",
+      metric: saguin_channel_records, by: channel }
+  - { type: breakdown, width: 6, height: medium, title: "Bytes, by channel",
+      metric: saguin_channel_bytes, by: channel }
+
+  - { type: break }
+  - { type: breakdown, width: 4, height: medium, title: "Consumers, by channel",
+      metric: saguin_channel_consumers, by: channel }
+  - { type: breakdown, width: 4, height: medium, title: "Removed by retention",
+      metric: saguin_channel_retention_removed_total, by: channel }
+  - { type: breakdown, width: 4, height: medium, title: "Positions lost, by channel",
+      metric: saguin_channel_position_lost_total, by: channel, severity: critical }
+
+  - { type: break }
+  # **Offsets are never summed.** One channel's next offset added to another's
+  # is a number about no channel at all, so these three are a split and there
+  # is no stat for them anywhere.
+  - { type: breakdown, width: 4, height: medium, title: "Next offset",
+      metric: saguin_channel_next_offset, by: channel }
+  - { type: breakdown, width: 4, height: medium, title: "Retention floor",
+      metric: saguin_channel_floor_offset, by: channel }
+  - { type: breakdown, width: 4, height: medium, title: "Slowest consumer",
+      metric: saguin_channel_consumer_position_min, by: channel }
+
+  - { type: break }
+  - { type: channels, width: 12 }
+
+  - { type: break }
+  - type: heading
+    text: "The stores underneath"
+
+  - { type: break }
+  - { type: stat, width: 4, title: "Storage errors", metric: saguin_storage_errors_total, alarm: "> 0",
+      note: "Every storage call that failed, reads as well as writes, on every store: the channels, the sessions, the broadcast log and the retained store" }
+  - { type: stat, width: 4, title: "Commits",  metric: saguin_storage_commits_total }
+  - { type: stat, width: 4, title: "Records committed", metric: saguin_storage_committed_records_total }
+
+  - { type: break }
+  # What each store holds against its own bound, and the most records one
+  # publish transaction may carry there (publish_commit_max_records: 256 where
+  # the key is absent, 0 with `none`; RFC 0005) - per provider, named by the
+  # broker rather than by this file. The batches it actually commits are
+  # records committed over commits, below.
+  # The `storage` widget below draws the same three as a table, with each
+  # provider's type beside them.
+  - { type: breakdown, width: 4, height: medium, title: "Bytes held, by store",
+      metric: saguin_provider_bytes, by: provider }
+  - { type: breakdown, width: 4, height: medium, title: "Bound, by store",
+      metric: saguin_provider_max_bytes, by: provider }
+  - { type: breakdown, width: 4, height: medium, title: "Batch ceiling, by store",
+      metric: saguin_provider_publish_commit_max_records, by: provider }
+
+  - { type: break }
+  - { type: breakdown, width: 4, height: medium, title: "Commits, by provider",
+      metric: saguin_storage_commits_total, by: provider }
+  - { type: breakdown, width: 4, height: medium, title: "Records committed, by provider",
+      metric: saguin_storage_committed_records_total, by: provider }
+  - { type: breakdown, width: 4, height: medium, title: "Storage errors, by provider",
+      metric: saguin_storage_errors_total, by: provider, severity: critical }
+
+  - { type: break }
+  - { type: storage, width: 12 }

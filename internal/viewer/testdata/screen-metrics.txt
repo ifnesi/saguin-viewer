@@ -1,0 +1,42 @@
+# HELP saguin_build_info Always 1.
+# TYPE saguin_build_info gauge
+saguin_build_info{version="0.1.0",broker_id="edge-07"} 1
+# HELP saguin_uptime_seconds How long this process has been running.
+# TYPE saguin_uptime_seconds gauge
+saguin_uptime_seconds 93784.5
+# HELP saguin_connections Clients connected now.
+# TYPE saguin_connections gauge
+saguin_connections 41
+# HELP saguin_sessions_offline Sessions held with nothing connected.
+# TYPE saguin_sessions_offline gauge
+saguin_sessions_offline 6
+# HELP saguin_subscriptions Subscriptions now.
+# TYPE saguin_subscriptions gauge
+saguin_subscriptions 118
+# HELP saguin_channel_records Records a channel holds.
+# TYPE saguin_channel_records gauge
+saguin_channel_records{channel="events"} 1204882
+saguin_channel_records{channel="telemetry"} 88301
+saguin_channel_records{channel="jobs"} 412
+# HELP saguin_channel_bytes Bytes an append or queue channel holds.
+# TYPE saguin_channel_bytes gauge
+saguin_channel_bytes{channel="events"} 432164864
+saguin_channel_bytes{channel="telemetry"} 32924794
+saguin_channel_bytes{channel="jobs"} 1153434
+# HELP saguin_channel_next_offset The offset this channel will assign next.
+# TYPE saguin_channel_next_offset gauge
+saguin_channel_next_offset{channel="events"} 1204883
+saguin_channel_next_offset{channel="telemetry"} 88302
+saguin_channel_next_offset{channel="jobs"} 413
+# HELP saguin_channel_floor_offset The oldest offset this channel still holds.
+# TYPE saguin_channel_floor_offset gauge
+saguin_channel_floor_offset{channel="events"} 900000
+saguin_channel_floor_offset{channel="telemetry"} 1
+saguin_channel_floor_offset{channel="jobs"} 1
+# HELP saguin_channel_consumer_position_min The lowest stored position on this channel.
+# TYPE saguin_channel_consumer_position_min gauge
+saguin_channel_consumer_position_min{channel="events"} 899998
+saguin_channel_consumer_position_min{channel="telemetry"} 88000
+# HELP saguin_queue_depth Records waiting to be handed out.
+# TYPE saguin_queue_depth gauge
+saguin_queue_depth{channel="jobs"} 412

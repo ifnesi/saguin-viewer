@@ -1,0 +1,185 @@
+# saguin-viewer, configured the way a service is configured.
+#
+#     .venv/bin/python app.py saguin-viewer.yaml
+#
+# **Every value here is an environment variable with its default beside it**,
+# the shape docker compose uses: `${NAME:-default}` takes the variable when
+# it is set and the default when it is not. So this file runs as it stands
+# against a broker on loopback, and every knob can be moved by exporting one
+# variable - which is what lets a password reach the viewer without being
+# written down anywhere.
+#
+#     export SAGUIN_OPS_PASSWORD=…      # and nothing here changes
+#
+# `${NAME}` with no `:-` is the strict form: unset, it stops the viewer and
+# names the variable rather than resolving to an empty string. An empty
+# password is a credential that fails at the broker, and the operator then
+# goes looking at the broker for a variable they did not export.
+#
+# A key this file does not know is refused at startup rather than ignored,
+# and so is a value of the wrong shape - `true` where a number belongs. A
+# setting that quietly does nothing is one an operator believes they made.
+
+# Where the viewer serves its own page, in the shape a saguin listener has:
+# a `tcp` block with an address, or a `unix` block with a socket path and
+# the socket's permission bits. One or the other - a viewer given both
+# stops at startup and says so - because there is never a second door to
+# secure. Loopback by default, and when neither block is written: this is
+# a personal instrument rather than a deployment, and the page shows
+# everything the two credentials below can reach.
+#
+# A Unix socket is the choice when a reverse proxy on the same machine
+# fronts the page, or when who may open it is a question of file
+# permissions rather than of network. To use one, comment the `tcp` block
+# out and the `unix` block in: `mode` is octal, and 0660 is owner and group.
+# A stale socket file left by a viewer that died is replaced at the next
+# start.
+#
+# **The TCP door answers to an address and refuses a name.** A browser sends
+# the name it was loaded by, so a request arriving as `viewer.example.com`
+# is a page on another site reaching this viewer through your browser - and
+# a domain that re-resolves to 127.0.0.1 is how that page reaches a viewer
+# on loopback. There is nothing to configure: being reached by a name means
+# a proxy, and the socket above is where a proxy goes. Two arrangements,
+# then: a proxy beside the viewer on that socket, or the address in the
+# browser's bar. Which broker this page reads is the `broker` block below
+# and is no part of this - the check is on requests arriving here, never on
+# what the page goes and asks for.
+listen:
+  tcp:
+    address: "${SAGUIN_VIEWER_LISTEN:-127.0.0.1:8080}"
+  # unix:
+  #   path: "${SAGUIN_VIEWER_SOCKET:-/run/saguin-viewer.sock}"
+  #   mode: "${SAGUIN_VIEWER_SOCKET_MODE:-0660}"
+
+# How many arrivals to keep per topic on an `append` channel, to start
+# with: the page's *keep* selector moves it to 100, 500, 1000 or 2000, and
+# a choice made there is remembered by the browser and re-applied on the
+# next load. A `latest` channel keeps one, which is how many it has. Every
+# message the viewer holds is in memory and bounded; only the metrics ring
+# and the handled dead letters go to disk, and only when `history_file`
+# names a file.
+messages_per_topic: "${SAGUIN_VIEWER_MESSAGES_PER_TOPIC:-25}"
+
+# How many arrivals the live feed keeps across every topic - the "everything,
+# as it arrives" panel, which is a second reference to messages the per-topic
+# rings are already holding rather than another copy of them. Bounded for the
+# reason everything here is bounded: a viewer left open on a busy broker would
+# otherwise hold the fleet's traffic until the machine noticed. Shrink it on a
+# busy broker; a reader that falls behind the ring is told so rather than
+# handed a feed with a hole in it. The page's own *keep* selector on that
+# panel chooses how many of these the browser draws, 500 to start with; it
+# does not resize this ring.
+feed_messages: "${SAGUIN_VIEWER_FEED_MESSAGES:-2000}"
+
+# Seconds between scrapes of the broker's /metrics, or 0 to follow the
+# broker's own min_scrape_interval. It can only be longer: the broker answers
+# a scrape arriving sooner with the previous catalogue, so a shorter setting
+# is clamped, and the page says so. Lengthen it to scrape a busy broker less
+# often.
+scrape_interval: "${SAGUIN_VIEWER_SCRAPE_INTERVAL:-0}"
+
+# Where to keep the metrics ring across restarts, or empty to keep it only in
+# memory. The broker holds no history, so every chart begins when the viewer
+# begins and blanks when it restarts; a writable path here names a SQLite
+# database (e.g. history.db) the bounded ring (up to five days) is committed to
+# at every scrape and reloaded from at start, so the dashboards resume. The
+# gap for any downtime is drawn as one.
+history_file: "${SAGUIN_VIEWER_HISTORY_FILE:-}"
+
+# Dashboards shown as tabs, right of Topics, in the order written here: a
+# mapping of tab name to file. A relative path is resolved beside app.py.
+# Every card is validated at startup, so a file that names a metric the page
+# cannot draw stops the viewer and names the card rather than drawing a blank.
+# Remove an entry to drop its tab; remove them all for just the built-in
+# dashboard. The seven shipped in dashboards/ are a partition of what the
+# broker exports: every metric it publishes a number for is on exactly one of
+# them, and none is on two - so a number has one place to be looked for. None
+# of them names a provider, a channel, a queue or a bridge, so all seven run
+# against any broker. See the README.
+dashboard:
+  Traffic: "dashboards/traffic.yaml"
+  Clients: "dashboards/clients.yaml"
+  Queues:  "dashboards/queues.yaml"
+  Storage: "dashboards/storage.yaml"
+  Bridges:  "dashboards/bridge.yaml"
+  QoS 2:   "dashboards/qos2.yaml"
+  Runtime: "dashboards/runtime.yaml"
+
+broker:
+  # The door the records come through.
+  mqtt:
+    host: "${SAGUIN_MQTT_HOST:-127.0.0.1}"
+    port: "${SAGUIN_MQTT_PORT:-1883}"
+    username: "${SAGUIN_MQTT_USER:-}"
+    password: "${SAGUIN_MQTT_PASSWORD:-}"
+
+    # "5" or "3.1.1".
+    #
+    # Where a subscriber starts is the channel's business and the same for
+    # both protocols. What 3.1.1 loses is everything carried beside the
+    # payload: no user properties, so no offset, broker timestamp or schema
+    # pointer; no Response Topic, so no point read and no answered seek.
+    # Connecting as 3.1.1 is how an operator sees what an old device sees.
+    # The page says which it connected as.
+    protocol: "${SAGUIN_MQTT_PROTOCOL:-5}"
+
+    # Recognisable on purpose. This viewer holds a stored position like any
+    # other durable consumer and appears by name in
+    # /v1/operations/consumers, where a mystery client id is a device
+    # somebody goes looking for.
+    client_id: "${SAGUIN_VIEWER_CLIENT_ID:-saguin-viewer}"
+
+    # What the viewer watches. `#` is everything, and it is the only filter
+    # that shows a topic no channel claims - the topic somebody is looking
+    # for when a publish is going nowhere. The broker leaves a queue's
+    # records out of it by itself, so this cannot take a job even asking for
+    # everything. Narrow it on a broker holding more history than one
+    # machine wants replayed at it.
+    #
+    # **And narrow it whenever the credential above is scoped by an acl_file.**
+    # `#` is granted on a broker with no ACL and refused by one with a
+    # credential scoped to a channel - `Not authorized`, in the SUBACK, which
+    # is an ordinary acknowledgement rather than an error. Left at `#` under
+    # such a credential the viewer connects, receives nothing, and shows an
+    # empty page; the page now names the refused filter in its header, and this
+    # is the setting that fixes it. Write the filters the credential may read:
+    #
+    #     subscribe: "jobs/__dlq/#"
+    #     subscribe: "iot/{state,events}/#"
+    subscribe: "${SAGUIN_VIEWER_SUBSCRIBE:-#}"
+
+    # Seconds. A seek moves this client's stored position, which only exists
+    # if the session outlives the connection - so this cannot be zero. It is
+    # deliberately short: a viewer parked behind the head is a consumer that
+    # is behind, and it drags saguin_channel_consumer_position_min down, the
+    # number saguin's one standing alert is built on.
+    session_expiry: "${SAGUIN_MQTT_SESSION_EXPIRY:-3600}"
+
+    keepalive: "${SAGUIN_MQTT_KEEPALIVE:-30}"
+
+    tls:
+      enabled: "${SAGUIN_MQTT_TLS:-false}"
+      ca_file: "${SAGUIN_MQTT_TLS_CA:-}"
+      # Given together with the key or not at all: half a client certificate
+      # is one that will not be sent, and a door requiring one would refuse
+      # with nothing saying why.
+      cert_file: "${SAGUIN_MQTT_TLS_CERT:-}"
+      key_file: "${SAGUIN_MQTT_TLS_KEY:-}"
+      insecure_skip_verify: "${SAGUIN_MQTT_TLS_INSECURE:-false}"
+
+  # The door the numbers come through. A credential narrowed to /metrics is
+  # enough for the channel list, the badges and what to subscribe to; it
+  # loses the operations panels, and the page says so on the panel rather
+  # than refusing to start.
+  operations:
+    url: "${SAGUIN_OPS_URL:-http://127.0.0.1:9090}"
+    username: "${SAGUIN_OPS_USER:-}"
+    password: "${SAGUIN_OPS_PASSWORD:-}"
+
+    tls:
+      enabled: "${SAGUIN_OPS_TLS:-false}"
+      ca_file: "${SAGUIN_OPS_TLS_CA:-}"
+      cert_file: "${SAGUIN_OPS_TLS_CERT:-}"
+      key_file: "${SAGUIN_OPS_TLS_KEY:-}"
+      insecure_skip_verify: "${SAGUIN_OPS_TLS_INSECURE:-false}"

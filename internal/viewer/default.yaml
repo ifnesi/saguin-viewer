@@ -1,0 +1,151 @@
+# The dashboard used when no file is named, so the tool is useful with none.
+#
+# **It asks for numbers only some brokers have.** Queue metrics need a queue
+# channel, bridge metrics need a bridge, and a refusal counter does not exist
+# until something has been refused - RFC 0005 says so of the refusal families:
+# "no series until a provider has failed ... a rate over a series that does not
+# exist is nothing, and nothing has gone wrong". A dashboard file you write is
+# refused when it names a metric this broker does not serve, because you named
+# it; this one says at the foot of the screen which of its metrics were absent,
+# and draws the rest.
+#
+# **One screen, not the catalogue.** Every metric Sagüin serves is drawn by the
+# web viewer; this default is what fits an eighty-column terminal and answers
+# "is it up, is anything behind, is anything lost, is anything refused". Left
+# to the web viewer, or to a dashboard file of your own: traffic volumes (bytes,
+# publishes received, deliveries sent, connections opened), Wills, restored
+# sessions, the exactly-once counts, a session's queue, provider bytes and
+# commit statistics, retention and superseded counts, the queue lifecycle
+# counters beside depth, in flight and dead-lettered, and the per-protocol
+# connection split, and the Go runtime's ten series: they are rates, and this
+# tool draws one scrape. What is lost is here in full: an operator reading one
+# screen must not miss a record the broker let go.
+refresh: 60s
+
+groups:
+  # Uptime first, because the question after "is it up" is "since when", and a
+  # broker whose uptime is minutes is one that restarted.
+  - title: Broker
+    layout: columns
+    metrics:
+      - saguin_uptime_seconds
+      - saguin_connections
+      - saguin_sessions_offline
+      - saguin_subscriptions
+      - saguin_retained_messages
+
+  # **The one alert the catalogue exists for is the last column here.**
+  # RFC 0005: floor above the lowest stored position means retention has passed
+  # a consumer, so when that consumer returns it is refused rather than served
+  # the oldest surviving record - "invariant 1 holding, which is correct and is
+  # also a customer's missing afternoon of telemetry". Its warning shot is the
+  # column before it, next minus that position.
+  #
+  # **Both are computed here because no metric can carry either.** The RFC says
+  # so of the lag: it would need a threshold nobody can choose on an operator's
+  # behalf, or a series per consumer, which is the line the catalogue is closed
+  # against. So the broker publishes the operands and a dashboard does the
+  # arithmetic - and a condition shown as two adjacent numbers is one nobody
+  # notices, which is the whole reason `data lost` is a column rather than a
+  # subtraction left to the reader.
+  #
+  # Both are `-` until something consumes durably, because
+  # saguin_channel_consumer_position_min has no series until then and an
+  # unknown operand makes the cell unknown rather than zero.
+  #
+  # **The floor is an operand here rather than a column, and that is what
+  # computing bought.** It earned a column when the comparison had to be done
+  # by eye; now `data lost` is the reading it was there for, and the floor
+  # itself is `next_offset - records` on the same row. Eight columns do not fit
+  # an eighty-column terminal, and this is the one that stopped paying for its
+  # width. saguin_channel_consumers stays: it is the denominator RFC 0005 says
+  # separates one straggler from a fleet that has stopped, which no other
+  # number here answers.
+  - title: Channels
+    layout: rows
+    by: channel
+    metrics:
+      - saguin_channel_records
+      - saguin_channel_bytes
+      - saguin_channel_next_offset
+      - saguin_channel_consumers
+      - name: behind
+        value: saguin_channel_next_offset - saguin_channel_consumer_position_min
+      - name: data lost
+        value: saguin_channel_floor_offset > saguin_channel_consumer_position_min
+
+  # Depth is work waiting, inflight is work leased to a worker right now, and
+  # dead-lettered is work that ran out of attempts and is sitting on the __dlq
+  # channel waiting for somebody to look at it.
+  - title: Queues
+    layout: rows
+    by: channel
+    metrics:
+      - saguin_queue_depth
+      - saguin_queue_inflight
+      - saguin_queue_dead_lettered_total
+
+  # A bridge that is down is the thing an operator most wants a number for, and
+  # `stopped` is the one that does not fix itself: RFC 0005 keeps it out of
+  # /health deliberately, because restarting this broker cannot reach somebody
+  # else's.
+  - title: Bridges
+    layout: rows
+    by: bridge
+    metrics:
+      - saguin_bridge_connected
+      - saguin_bridge_stopped
+      - saguin_bridge_received_total
+      - saguin_bridge_sent_total
+
+  # **Different failures, and they are not interchangeable.** A refused
+  # publish never entered the broker; a dropped delivery entered and could not
+  # be written to a client; an expired one waited past its deadline; a refused
+  # delivery is broadcast to a subscriber that had not acknowledged enough of
+  # what it already had, or had run through its packet identifiers; an
+  # abandoned exactly-once publish was taken in and never released, and its
+  # publisher is simply never answered.
+  - title: Dropped and refused
+    layout: columns
+    metrics:
+      - saguin_deliveries_dropped_total
+      - saguin_deliveries_expired_total
+      - saguin_deliveries_refused_total
+      - saguin_broadcast_unmatched_total
+      - saguin_qos2_abandoned_total
+
+  # **What the broker let go, by why.** A session's deliveries given up, a
+  # session dropped whole, a shared group's deliveries let go, a bridge's
+  # records not sent upstream, and its records from upstream not stored - each
+  # counts a record that will not arrive, and the cause says which knob or
+  # failure to look at. A row per cause across the five; a cause one of them
+  # does not have is blank in its column.
+  - title: Lost, by cause
+    layout: rows
+    by: cause
+    metrics:
+      - saguin_session_deliveries_dropped_total
+      - saguin_sessions_dropped_total
+      - saguin_shares_dropped_total
+      - saguin_bridge_unsent_total
+      - saguin_bridge_unstored_total
+
+  # A storage call that failed. No series until a provider has, so on a healthy
+  # broker this heading says it has nothing - which is the reading wanted.
+  - title: Storage errors, by provider
+    layout: rows
+    by: provider
+    metrics:
+      - saguin_storage_errors_total
+
+  # The three that carry a reason, one row per reason, because "the fleet's data
+  # is not arriving" is answered by which code the clients were given. The
+  # subscriptions column counts each filter a SUBACK refused, by the code's
+  # name, and answers "why is this device not getting anything".
+  - title: Refusals, by reason
+    layout: rows
+    by: reason
+    metrics:
+      - saguin_publish_refused_total
+      - saguin_subscriptions_refused_total
+      - saguin_connections_refused_total

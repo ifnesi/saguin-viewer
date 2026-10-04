@@ -1,0 +1,831 @@
+/* saguin-viewer.
+ *
+ * **Two themes from one set of tokens.** Every colour is a variable on
+ * :root, and the light theme redefines the same names - so a rule is
+ * written once and no component knows which theme it is in. The palette is
+ * deliberately the familiar one an operator already reads all day: the same
+ * blues, greens and ambers that GitHub, Grafana and every terminal use for
+ * link, healthy and warning. A monitoring tool is not the place to be
+ * original about what red means.
+ */
+
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface-2: #1c2128;
+  --raised:    #21262d;
+  --border:    #30363d;
+  --border-2:  #21262d;
+  --text:      #e6edf3;
+  --dim:       #8b949e;
+  --faint:     #6e7681;
+  --accent:    #4493f8;
+  --accent-bg: rgba(68, 147, 248, 0.15);
+  --good:      #3fb950;
+  --warn:      #d29922;
+  --bad:       #f85149;
+  --purple:    #bc8cff;
+
+  --r-sm: 4px;  --r-md: 6px;  --r-lg: 10px;
+  --s-1: 4px;   --s-2: 8px;   --s-3: 12px;
+  --s-4: 16px;  --s-5: 24px;  --s-6: 32px;
+
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --header-h: 52px;
+}
+
+[data-theme="light"] {
+  --bg:        #ffffff;
+  --surface:   #f6f8fa;
+  --surface-2: #eaeef2;
+  --raised:    #ffffff;
+  --border:    #d1d9e0;
+  --border-2:  #e4e8ed;
+  --text:      #1f2328;
+  --dim:       #59636e;
+  --faint:     #818b98;
+  --accent:    #0969da;
+  --accent-bg: rgba(9, 105, 218, 0.1);
+  --good:      #1a7f37;
+  --warn:      #9a6700;
+  --bad:       #cf222e;
+  --purple:    #8250df;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+
+/* The resolved configuration, coloured by role rather than left as one
+   block of text: a key is where you look to find a setting, a value is
+   what it was resolved to, and the two are never the same colour a reader
+   already uses for something else on this page. */
+.yaml-key   { color: var(--accent); }
+.yaml-value { color: var(--warn); }
+
+/* ---------------------------------------------------------------- header */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: var(--header-h);
+  padding: 0 var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand { display: flex; align-items: center; gap: var(--s-2); margin-right: var(--s-1); }
+/* The brand is a link home, and looks like the brand rather than like a
+   link: an underline and a blue on a page's own name reads as something to
+   click *out* to. The cursor is the whole affordance. */
+a.brand, a.brand:visited, a.brand:hover, a.brand:active {
+  color: inherit; text-decoration: none;
+}
+a.brand { cursor: pointer; }
+a.brand:hover .mark { filter: brightness(1.1); }
+
+/* The same icon the browser tab carries, so the page and the tab are one
+   thing. It is an <img> rather than a lettered square now: the gradient and
+   the letter were standing in for an icon that already existed. */
+.brand .mark {
+  width: 22px; height: 22px; border-radius: var(--r-sm);
+  display: block; flex: none;
+}
+header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+/* A status pill rather than a sentence: an operator reads the colour before
+   the word, and the word is there for whoever cannot. */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 12px; color: var(--dim); white-space: nowrap;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot.up   { background: var(--good); box-shadow: 0 0 0 3px rgba(63,185,80,0.18); }
+.dot.down { background: var(--bad);  box-shadow: 0 0 0 3px rgba(248,81,73,0.18); }
+
+.stats { display: flex; gap: var(--s-4); margin-left: auto; align-items: center; }
+.stat { display: flex; align-items: baseline; gap: 5px; font-size: 12px; color: var(--dim); }
+.stat b { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.sub { color: var(--dim); font-size: 12px; }
+
+.iconbtn {
+  width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg); color: var(--dim);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0;
+}
+.iconbtn:hover { color: var(--text); border-color: var(--faint); }
+
+/* A warning that belongs to the whole page rather than to a panel: queues
+   are listed and never read, and somebody who does not know that reads an
+   empty queue pane as an empty queue. */
+.notice {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--dim); font-size: 12px;
+}
+.notice .key { color: var(--warn); font-weight: 600; }
+
+/* ----------------------------------------------------------------- shell */
+
+main {
+  display: grid;
+  height: calc(100vh - var(--header-h));
+}
+.tree, .detail { overflow: auto; }
+.tree {
+  background: var(--surface);
+  padding: var(--s-3) var(--s-2) var(--s-5);
+}
+.detail { padding: var(--s-5) var(--s-5) var(--s-6); }
+.detail.detail-dash { padding: 2px; }
+
+.sectionlabel {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--faint);
+  padding: 0 var(--s-2) var(--s-2);
+}
+
+/* A section label that folds its group away. It is a button because it is
+   one - clicking a heading that only looks like text is a thing nobody
+   discovers, and a keyboard reaches this one for free. */
+.sectionfold {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; border: 0; background: transparent;
+  font-family: inherit; cursor: pointer; text-align: left;
+}
+.sectionfold:hover { color: var(--dim); }
+.sectionfold .twist { padding-top: 1px; }
+/* How many are folded away, so the group does not read as empty. */
+.foldcount {
+  margin-left: auto; font-size: 10px; letter-spacing: 0;
+  color: var(--faint); background: var(--surface-2);
+  border-radius: 999px; padding: 1px 6px;
+}
+
+/* ------------------------------------------------------------------ tree */
+
+.node { cursor: default; }
+.node .row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px var(--s-2);
+  border-radius: var(--r-md);
+  cursor: pointer; white-space: nowrap;
+  position: relative;
+}
+.node .row:hover { background: var(--surface-2); }
+.node .row.on {
+  background: var(--accent-bg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.node .row.on > .label { color: var(--accent); font-weight: 600; }
+.label { overflow: hidden; text-overflow: ellipsis; }
+
+.twist {
+  width: 14px; flex: none; color: var(--faint); font-size: 9px;
+  transition: transform 0.12s ease;
+  /* It is a control now - a level that is both a topic and a parent opens
+     from here while the row itself selects the value. */
+  padding: 2px 0; margin: -2px 0;
+}
+.twist:hover { color: var(--text); }
+.twist.open { transform: rotate(90deg); }
+
+.leafcount {
+  color: var(--faint); font-size: 11px; margin-left: auto; padding-left: var(--s-3);
+  font-variant-numeric: tabular-nums; flex: none;
+}
+
+/* A channel's type, and the one thing on the row that is not the operator's
+   own vocabulary - so it is coloured per type and never per status. */
+.tag {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid currentColor; flex: none;
+  opacity: 0.85;
+}
+.tag.append    { color: var(--accent); }
+.tag.latest    { color: var(--good); }
+.tag.queue     { color: var(--purple); }
+.tag.broadcast { color: var(--faint); }
+.tag.retained  { color: var(--warn); }
+.tag.muted     { color: var(--faint); border-style: dashed; }
+
+.opsbutton {
+  display: flex; align-items: center; gap: var(--s-2);
+  width: 100%; margin: 0 0 var(--s-1);
+  padding: 0 var(--s-2);
+  font: inherit; text-align: left; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--r-md);
+  background: transparent; color: var(--dim);
+}
+.opsbutton:hover { background: var(--surface-2); color: var(--text); }
+.opsicon { flex: none; width: 1.2em; text-align: center; }
+/* The label takes the room and the count sits at the end, so a row with a
+   badge lines up with the rows without one. */
+.opslabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.opscount {
+  flex: none; font-size: 10px; line-height: 1;
+  color: var(--faint); background: var(--surface-2);
+  border-radius: 999px; padding: 2px 6px;
+}
+.opsbutton.on .opscount { color: var(--accent); background: var(--bg); }
+.opsbutton.on {
+  background: var(--accent-bg); color: var(--accent);
+  font-weight: 600; box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ---------------------------------------------------------------- detail */
+
+h2 {
+  font-size: 15px; margin: 0 0 var(--s-4); font-weight: 600;
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+}
+.topicname { font-family: var(--mono); color: var(--accent); font-size: 14px; }
+/* The topic in the feed is a real link: its href is the same fragment the
+   selected topic already lives at, so it copies and opens in a new tab. The
+   click is handled in JavaScript as well, because the page reads that
+   fragment when it loads and not when it changes. */
+a.topicname { color: var(--accent); text-decoration: none; cursor: pointer; }
+a.topicname:hover { text-decoration: underline; }
+
+/* **One pulse, not a repeating flash.** Clicking a topic in the feed fills
+   the filter box, which is a change to a control the reader was not looking
+   at - so it says so once. Three quick flashes is the vocabulary of an
+   error, which this is not: something changed, and it was on purpose.
+   
+   **It holds before it fades.** The first version went from full to nothing
+   over 600ms with an ease-out, so the strong moment was a handful of frames
+   and easy to miss entirely. Half a second at full is what makes it land.
+   
+   **And it borrows the focus ring rather than tinting a background.** That
+   halo is already this page's way of saying a control is live, and a 10%
+   background wash on a box this small is not visible at all. The box takes
+   focus too, in app.js, so the ring stays until the reader clicks away -
+   a flash says something happened, and the caret says where. */
+@keyframes filterfilled {
+  0%, 55% {
+    background: var(--accent-bg); border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  100% {
+    background: var(--bg); border-color: var(--border);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+input.filled { animation: filterfilled 900ms ease-out; }
+
+.card {
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface); padding: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.card > h3 { margin: 0 0 var(--s-2); font-size: 13px; font-weight: 600; }
+
+pre {
+  margin: 0; padding: var(--s-3);
+  background: var(--bg); border: 1px solid var(--border-2);
+  border-radius: var(--r-md); overflow-x: auto;
+  font-size: 12px; font-family: var(--mono); line-height: 1.55;
+}
+
+/* One arrival. The metadata is chips above the payload rather than a
+   sentence beside it, so the eye finds the offset in the same place on
+   every message. */
+.msg {
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface); padding: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+.msgmeta {
+  color: var(--dim); font-size: 11px; margin-bottom: var(--s-2);
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--border-2);
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+}
+.chip b { color: var(--text); font-weight: 600; }
+
+.seek { /* uses .card */ }
+.seek form { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
+
+select, input, button, textarea {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 5px 9px;
+}
+input, select { min-width: 0; }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+button { cursor: pointer; font-weight: 500; }
+button:hover { border-color: var(--faint); background: var(--surface-2); }
+button.primary {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+
+/* The page's own confirmation, in place of window.confirm. Escape and the
+   backdrop both answer No, because the safe answer has to be the one a
+   hurried operator gets by dismissing the box. */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--s-4);
+}
+.modal {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  max-width: 560px; width: 100%; padding: var(--s-4) var(--s-4) var(--s-3);
+  outline: none;
+}
+.modal h3 { margin: 0 0 var(--s-3); font-size: 14px; font-weight: 600; }
+.modal-body { font-size: 13px; line-height: 1.5; }
+.modal-body p { margin: 0 0 var(--s-3); }
+.modal-body code { word-break: break-all; }
+/* What makes this a different decision from the same one twice. */
+.modal-warn {
+  color: var(--warn); border-left: 2px solid var(--warn);
+  padding-left: var(--s-3);
+}
+.modal-buttons {
+  display: flex; gap: var(--s-2); justify-content: flex-end;
+  margin-top: var(--s-4);
+}
+
+/* The topic view's own controls, laid out like the feed's so the two read as
+   one page rather than two. */
+/* The topic's strip is sticky like a panel head, but it is not the first
+   thing in the pane - Publish and the replay control sit above it - so it
+   pins at the pane's top edge rather than cancelling a padding that is not
+   there. */
+.panelhead-inline {
+  top: 0;
+  margin-left: 0; margin-right: 0;
+  padding-top: var(--s-2); padding-bottom: var(--s-2);
+}
+
+.msgcontrols {
+  display: flex; align-items: center; gap: var(--s-2);
+  margin: 0 0 var(--s-3); flex-wrap: wrap;
+}
+
+/* Page controls, under a table that has more rows than a screen. */
+.pager {
+  display: flex; align-items: center; gap: var(--s-2);
+  margin-top: var(--s-3); flex-wrap: wrap;
+}
+.pager .chip[disabled] { opacity: 0.4; cursor: default; }
+
+.reply { margin-top: var(--s-2); font-size: 12px; }
+.reply.ok  { color: var(--good); }
+.reply.bad { color: var(--bad); }
+
+/* An empty pane says what to do next, because the commonest reason one is
+   empty here is that nothing has been picked yet. */
+.empty {
+  color: var(--dim); text-align: center;
+  padding: var(--s-6) var(--s-4);
+  border: 1px dashed var(--border); border-radius: var(--r-lg);
+}
+
+.why { color: var(--dim); font-size: 12px; margin: 0 0 var(--s-2); }
+
+/* **The catalogue's own sentence about a series, on the card drawing it.**
+   A quiet marker rather than a line of prose per panel: the dashboard has
+   thirty of them, and thirty explanations would bury the numbers they are
+   about. `title` is the browser's own tooltip, so it needs no script and
+   works with the keyboard focus ring and a screen reader. */
+.info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; margin-left: 6px; border-radius: 50%;
+  border: 1px solid var(--border); color: var(--faint);
+  font-size: 9px; font-style: italic; font-weight: 600; line-height: 1;
+  cursor: help; vertical-align: middle; user-select: none;
+}
+.info:hover { color: var(--text); border-color: var(--dim); }
+/* The line above a payload saying it is not text. In grey it read as a
+   caption and was skimmed past; what it is saying is that the box below
+   holds bytes rather than the record, which is the first thing to know
+   about it. */
+.payloadwhy { color: var(--bad); }
+
+.opsblock { margin-bottom: var(--s-5); }
+
+table.ops {
+  border-collapse: collapse; width: 100%; margin-top: var(--s-2);
+  font-size: 13px;
+}
+table.ops th, table.ops td {
+  text-align: left; padding: 6px var(--s-3) 6px 0;
+  border-bottom: 1px solid var(--border-2); white-space: nowrap;
+}
+table.ops th {
+  font-weight: 600; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--faint);
+  border-bottom-color: var(--border);
+}
+table.ops td { font-variant-numeric: tabular-nums; }
+table.ops tr:hover td { background: var(--surface-2); }
+table.ops tr.behind td { color: var(--warn); font-weight: 600; }
+/* A reader that lost records and was never told. It is a loss rather than a
+   lag, and nothing else in the system will ever report it - the device does
+   not know and cannot ask - so it is the stronger colour rather than the
+   warning one, which `behind` above already spends on a straggler that is
+   still going to catch up. */
+table.ops tr.silent td { color: var(--bad); font-weight: 600; }
+
+/* The Alarms tab: the backend's episode record as a plain table. A firing row
+   carries the same critical colour the alarm tiles and the tab badge use, so
+   the three never disagree about what is firing. Its head pins the same way
+   the dead-letter and retained-message heads do - `.panelhead-table` supplies
+   the padding, so this class carries none of its own. */
+/* A row, so the notify control sits at its right end rather than wrapping
+   under the counts - `margin-left: auto` needs a flex parent to push against. */
+.alarmsview-head { font-size: 13px; margin-bottom: var(--s-2);
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.alarmsview .dim { color: var(--dim); }
+.hasalarm-text { color: var(--critical); font-weight: 600; }
+.alarmtable tr.alarm-firing td { color: var(--critical); font-weight: 600; }
+.alarm-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--critical); margin-right: 4px;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 3px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+/* The divider between the tree and the detail. It is its own grid column
+   rather than a border, because a two-pixel border is a two-pixel target
+   and this is something people drag. */
+.resizer {
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.12s ease;
+  /* A wider target than the line it draws. Five pixels is a line; it is
+     not something a person can reliably put a cursor on, and a divider
+     that has to be aimed at is one nobody moves twice. */
+  position: relative;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+  cursor: col-resize;
+}
+.resizer:hover, .resizer:active { background: var(--accent); }
+
+/* ------------------------------------------------------------- charts ----
+ *
+ * The palette is the validated reference instance: categorical slots for
+ * series that are the subject, one sequential hue for magnitude, and a
+ * fixed status set that is never reused as "series 5". Dark is its own set
+ * of steps against the dark surface rather than an automatic flip of the
+ * light one.
+ *
+ * On the light surface two of the categorical slots sit below 3:1 against
+ * the background, so every categorical mark here carries a direct label -
+ * which four series would require anyway.
+ */
+:root {
+  --series-1: #3987e5;  /* blue    */
+  --series-2: #d95926;  /* orange  */
+  --series-3: #199e70;  /* aqua    */
+  --series-4: #c98500;  /* yellow  */
+  --seq:      #3987e5;
+  --seq-soft: #184f95;
+  --grid:     rgba(255, 255, 255, 0.07);
+}
+[data-theme="light"] {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --seq:      #2a78d6;
+  --seq-soft: #cde2fb;
+  --grid:     rgba(0, 0, 0, 0.07);
+}
+/* Fixed, never themed, never a series. */
+:root, [data-theme="light"] {
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+}
+
+.tiles {
+  display: grid; gap: var(--s-3);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin-bottom: var(--s-4);
+}
+.tile {
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface); padding: var(--s-3) var(--s-4);
+}
+.tile .k {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--faint); font-weight: 600;
+}
+.tile .v {
+  font-size: 26px; font-weight: 600; line-height: 1.2;
+  font-variant-numeric: tabular-nums; margin-top: 2px;
+}
+.tile .u { font-size: 12px; color: var(--dim); font-weight: 400; }
+.tile.alarm { border-color: var(--critical); }
+.tile.alarm .v { color: var(--critical); }
+
+.grid2 {
+  display: grid; gap: var(--s-4);
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+}
+
+/* **A stroke that does not thicken with the card.** Every chart here draws
+   into a fixed-unit viewBox with preserveAspectRatio="none", and `.chart`
+   stretches it to whatever width the card has - so a 1200px card scales x by
+   about 3.75 while y stays 1, and `stroke-width: 2` then holds only on a
+   horizontal run. Steep segments got fatter as the card got wider and the
+   hover crosshair, being vertical, got the worst of it. non-scaling-stroke
+   measures the width in screen pixels after the transform, which is the one
+   thing that makes a stroke mean the same at every card size. */
+.chart { width: 100%; display: block; overflow: visible; }
+.chart .grid,
+.chart .line { vector-effect: non-scaling-stroke; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+
+/* **The point marker is HTML, not a `<circle>`, for the same reason.** A
+   circle in that stretched viewBox is drawn as an ellipse - wider and flatter
+   the wider the card - and non-scaling-stroke fixes only its outline, not its
+   shape. It sat under the fat line and was invisible until the line got thin.
+   Positioned over the chart instead: `left` is a percentage of the same
+   viewBox width the path uses, and `top` is exact because the svg's height
+   attribute is its rendered height. */
+.chartmark { position: absolute; width: 9px; height: 9px; border-radius: 50%;
+  transform: translate(-50%, -50%); pointer-events: none;
+  box-shadow: 0 0 0 2px var(--surface); }
+.chartmark.small { width: 5px; height: 5px; box-shadow: none; }
+.chart .axis { fill: var(--faint); font-size: 10px; font-family: var(--sans); }
+.chart .lbl  { fill: var(--dim);   font-size: 11px; font-family: var(--sans); }
+.chart .val  { fill: var(--text);  font-size: 11px; font-weight: 600;
+               font-variant-numeric: tabular-nums; font-family: var(--mono); }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+/* A legend is always present for two or more series, so identity is never
+   carried by colour alone. */
+.legend { display: flex; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-2); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.meter { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--seq); }
+
+.stale {
+  display: flex; align-items: center; gap: var(--s-2);
+  color: var(--dim); font-size: 12px; margin-bottom: var(--s-4);
+}
+
+.tabs { display: flex; gap: 2px; margin-left: var(--s-2); }
+.tabs button {
+  background: transparent; border: 1px solid transparent;
+  color: var(--dim); padding: 5px 12px; border-radius: var(--r-md);
+  font-size: 13px;
+}
+.tabs button:hover { background: var(--surface-2); color: var(--text); }
+.tabs button.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+
+/* **The controls stay, the list moves.** A long feed scrolled the pause
+ * button and the filter off the top, which is exactly when somebody reaches
+ * for them. `.detail` is the scrolling box, so a sticky child pins against
+ * it; the negative margins let the pinned strip span the full width and
+ * cover what passes underneath. */
+.panelhead {
+  position: sticky;
+  /* Pinned above the pane's own top padding, not below it. `top: 0` sticks
+     against the padding edge, which left a 24px band where rows scrolled
+     past in the open above the strip. */
+  top: calc(var(--s-5) * -1);
+  z-index: 5;
+  background: var(--bg);
+  /* The top padding matches the pane's own padding, so the pinned strip
+     covers the scroll container from its very edge. Any less and a sliver
+     of the list shows through above it as rows pass under.
+     **The negative top margin is only correct at the top of the pane.** It
+     cancels that padding, and on a panel where the head is not the first
+     thing - a topic view, where Publish and Replay come first - it instead
+     pulls up over the card above and crops its bottom edge. On a broadcast
+     topic, where there is no Replay card because broadcast cannot be
+     seeked, that card was Publish. */
+  margin: 0 calc(var(--s-5) * -1) var(--s-4);
+  padding: var(--s-5) var(--s-5) var(--s-3);
+  border-bottom: 1px solid var(--border);
+}
+/* **First child of whatever wraps it, not of the pane.** This was written
+   as `.detail > .panelhead:first-child`, and every panel returns its head
+   inside a wrapper - so it matched nothing, the head sat one pane-padding
+   below where it pins, and it drifted that far up before locking. A header
+   that moves at all is one somebody watches instead of reading. */
+.panelhead:first-child { margin-top: calc(var(--s-5) * -1); }
+.panelhead h2, .panelhead h3 { margin-bottom: var(--s-3); }
+.panelhead > :last-child { margin-bottom: 0; }
+.panelhead .card { margin-bottom: 0; border: none; background: transparent; padding: 0; }
+/* The strip holds several things now - publish, replay, then the title row -
+   and they need air between them without any of them carrying a margin that
+   would also apply outside the strip. */
+.panelhead > * + * { margin-top: var(--s-3); }
+/* **A pinned strip can be opened.** The publish form unfolds inside it, and
+   a sticky block taller than the box it pins in does not scroll: the list
+   moves underneath while its own Send button stays off the bottom of the
+   screen, out of reach. Capped, and scrolled inside itself instead. */
+.panelhead { max-height: 60vh; overflow-y: auto; overflow-x: hidden; }
+
+/* **A pager inside the pinned strip carries no margin of its own.** The
+   strip already spaces its children, and the copy under a table needs the
+   air that one above a table does not. */
+.panelhead > .pager { margin: 0; }
+
+/* **A table under a pinned strip pins its own column names.** Otherwise the
+   strip stays and the header row it belongs to scrolls away, which is the
+   worst of both: controls without the columns they act on.
+   `--panelhead-h` is the strip's measured height, written on the pane by the
+   panel that drew it. Sticking at `0` instead put the column names *behind*
+   the strip - pinned, invisible, and indistinguishable from not pinned at
+   all. Measured: the row sat 130px above the strip's bottom edge.
+
+   **Minus `--s-5`, because that is where the strip's bottom actually is.**
+   The strip pins at `top: calc(var(--s-5) * -1)`, so its bottom edge sits
+   one `--s-5` higher than its own height - and pinning the column row at
+   the bare height left a 24px band between the strip's line and the
+   columns, with the list scrolling through it in the open. A margin is
+   transparent; the rows behind it are not.
+
+   **And the column row must already be there when it locks.** A sticky
+   element scrolls with the page until it reaches its offset, so any distance
+   between where it rests and where it pins is distance it visibly travels
+   first - the row creeps up, stops, and a reader watches it instead of
+   reading. So the strip carries no bottom margin here and the table no top
+   margin: the row rests exactly where it locks, and moves not at all. The
+   air between them is the strip's own padding, which is opaque.
+
+   Only on tables that sit under a strip: `.ops` is used inside cards too,
+   where there is nothing to pin against. */
+.panelhead-table { margin-bottom: 0; padding-bottom: var(--s-4); }
+table.ops.undertheh { margin-top: 0; }
+.ops.undertheh thead th {
+  position: sticky; top: calc(var(--panelhead-h, 0px) - var(--s-5)); z-index: 4;
+  background: var(--bg);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+/* **A decoded payload says what read it.** The bytes are the record; this is
+ * an interpretation of them, made with a schema fetched from the broker at
+ * the moment of asking - so it is drawn as its own card, attributed, rather
+ * than quietly replacing what arrived. */
+.schemablock { margin-top: var(--s-2); }
+.decoded {
+  border: 1px solid var(--purple);
+  border-radius: var(--r-md);
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  margin-bottom: var(--s-2);
+}
+.decoded.warn { border-color: var(--warning); }
+.decodedhead {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+  font-size: 11px; color: var(--dim); margin-bottom: var(--s-2);
+}
+.decodedhead b { color: var(--text); }
+.tag.schema { color: var(--purple); }
+
+/* The line under a sparkline: the span it covers, or the moment under the
+   pointer. A chart this small has no room for an axis and still has to
+   answer "when". */
+.sparkfoot {
+  display: flex; justify-content: space-between; gap: var(--s-2);
+  font-size: 10px; color: var(--faint); margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+.sparkfoot b { color: var(--text); }
+
+/* Decoding available and switched off: said, with the switch beside it. A
+   feature that is silently absent reads as one that is broken. */
+.decoded.off { border-color: var(--border); border-style: dashed; }
+
+/* Dashboards written in a file (see README). A responsive Bootstrap-style
+   grid: `columns` (default 12) tracks of equal width, each card spanning
+   `width` of them and flowing to fill the row, wrapping to the window. Height
+   is a named box - small/medium/large - or natural, and the card scrolls
+   inside it. A narrow window stacks the cards one per row. */
+.dashgrid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 12), minmax(0, 1fr));
+  grid-auto-flow: row;   /* not dense: keep card order so a `break` holds */
+  align-items: start;
+  gap: var(--s-4);
+  padding: 0 16px 16px;
+}
+.dashgrid > .cell { grid-column: span var(--w, 6); min-width: 0; display: flex; }
+.dashgrid > .cell > * { flex: 1 1 0; min-width: 0; margin-bottom: 0; overflow: auto; }
+.dashgrid > .cell.h-small  > * { height: 118px; }
+.dashgrid > .cell.h-medium > * { height: 240px; }
+.dashgrid > .cell.h-large  > * { height: 380px; }
+.dashgrid > .cell.h-auto   > * { height: auto; overflow: visible; }
+.dashgrid > .cell > .tiles { display: block; }   /* a tile fills its own cell */
+
+/* Text and heading cards: inline prose, no panel border, like the built-in. */
+.specprose { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.specprose h2 { margin: 0 0 var(--s-1); font-size: 15px; color: var(--text); }
+.specprose h3 { margin: var(--s-2) 0 var(--s-1); font-size: 13px; color: var(--text); }
+.specprose p { margin: 0 0 var(--s-2); }
+.specprose p:last-child { margin-bottom: 0; }
+.specprose code { font-family: var(--mono); font-size: 11px; background: var(--bg);
+  padding: 0 3px; border-radius: 3px; }
+.specprose a { color: var(--accent); }
+.specheading { display: flex; align-items: flex-end; }
+.specheading h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+
+@media (max-width: 860px) {
+  .dashgrid { grid-template-columns: 1fr; }
+  .dashgrid > .cell { grid-column: auto; }
+}
+
+/* The Dashboard tab: a fixed sub-tab row and one shared control strip that
+   govern every dashboard, over a body that scrolls. */
+.dashwrap { display: flex; flex-direction: column; height: 100%; }
+.subtabs { display: flex; gap: 2px; flex: none; flex-wrap: wrap;
+  padding: 10px 16px 0; border-bottom: 1px solid var(--border); }
+.subtabs button { background: transparent; border: none;
+  border-bottom: 2px solid transparent; color: var(--dim);
+  padding: 6px 14px; font-size: 13px; margin-bottom: -1px; cursor: pointer; }
+.subtabs button:hover { color: var(--text); }
+.subtabs button.on { color: var(--accent); font-weight: 600;
+  border-bottom-color: var(--accent); }
+.dashwrap > .stale { flex: none; margin: 0; padding: 10px 16px; }
+.dashbody { flex: 1; overflow: auto; padding-top: var(--s-3); }
+.dashbreak { height: 0; }
+
+/* Selects that live inside a chip (the shared show/refresh controls) must not
+   carry the global input padding, or the chip grows taller than its siblings. */
+.chip select { padding: 0 2px; height: auto; line-height: 1.5; border: none;
+  background: transparent; }
+.chip select:focus { box-shadow: none; }
+
+/* Alarms that reach the operator: a count badge on the Alarms tab, and the
+   opt-in notification control in that tab's head. There is no strip on the
+   Dashboard tab any more - a firing card is already red where it is drawn,
+   and the strip took the notify control with it every time it went away. */
+.tabs button.hasalarm { color: var(--critical); }
+/* A subscription the broker refused: the page is connected and empty, and
+   nothing else on it would say why. */
+.warnpill { color: var(--critical); border-color: var(--critical); }
+.warnpill code { color: inherit; }
+.alarmbadge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px;
+  border-radius: 9px; background: var(--critical); color: #fff; font-size: 11px;
+  font-weight: 700; text-align: center; line-height: 16px; }
+.alarmnotify { margin-left: auto; cursor: pointer; }
+/* Why notifying is not on, said rather than swallowed. */
+.notifynote { margin: 0 0 var(--s-2) 0; padding: 6px 10px; font-size: 12px;
+  color: var(--text); background: var(--surface-2); border-radius: var(--r-sm);
+  border-left: 3px solid var(--warn); }
+
+
+/* **A breakdown's rows, with the name and the number always on them.** The
+   chart this replaced reserved room for a label and drew none, so every bar
+   was anonymous and hovering one at a time was the only way to read it. */
+.bars { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
+.barrow { display: flex; align-items: center; gap: var(--s-2); font-size: 12px; }
+.barlabel {
+  flex: 0 0 34%; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--mono); color: var(--text);
+}
+.bartrack { flex: 1 1 auto; min-width: 0; height: 13px; display: flex; align-items: center; }
+.barfill { display: block; height: 13px; border-radius: 2px; }
+.barvalue {
+  flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--faint);
+  min-width: 48px; text-align: right;
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sagüin Viewer</title>
+<!-- `img/`, not `/static/img/`: this app is created with static_url_path=""
+     so the static folder is served at the root - which is why the stylesheet
+     below is `app.css` rather than `/static/app.css`. The `/static` prefix was
+     a path Flask never serves here, so the icon 404'd and browsers fell back
+     to asking for /favicon.ico, which 404s too. -->
+<link rel="icon" type="image/x-icon" href="img/favicon.ico">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="app.css">
+<script>
+  // **The theme is applied before the stylesheet paints anything**, so a
+  // dark-theme reader does not get a white flash on every load. It is read
+  // here rather than in app.js because that file runs after first paint.
+  (function () {
+    var m = document.cookie.match(/(?:^|; )saguin_viewer_theme=([^;]*)/);
+    document.documentElement.dataset.theme = m ? decodeURIComponent(m[1]) : "dark";
+  })();
+</script>
+<div id="root"></div>
+<!--
+  React and htm are kept in lib/ beside this file rather than pulled from a
+  CDN,
+  so the page works on a machine with no route to the internet - which is
+  most of the places a broker like this one runs. htm is what makes JSX
+  unnecessary: no build step, no toolchain, one file to read.
+-->
+<script src="lib/react.production.min.js"></script>
+<script src="lib/react-dom.production.min.js"></script>
+<script src="lib/htm.js"></script>
+<script src="app.js"></script>

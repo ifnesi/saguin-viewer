@@ -1,0 +1,139 @@
+# The web viewer's container image, published so that a stack can run it without
+# a checkout of this repository.
+#
+# **It exists because saguin's demos build it from source today**, reaching across
+# into `examples/saguin-viewer/Dockerfile` with the repository root as their build
+# context. Once the viewer leaves that tree there is nothing there to build, so the
+# demos point at this image instead.
+#
+# **Nothing here runs until somebody pushes a tag.** That is the gate: the workflow
+# can sit in the repository without publishing anything, and a release is an act
+# rather than a side effect of merging.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the tag to build and publish, for a re-run"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      # **The version is worked out before anything is checked out, because it
+      # decides what is checked out.** A dispatch names a tag; a tag push is one.
+      - name: which version this is publishing
+        id: tags
+        run: |
+          v="${{ inputs.tag }}"
+          [ -n "$v" ] || v="${GITHUB_REF_NAME}"
+          case "$v" in
+            v*) ;;
+            *) echo "::error::$v is not a release tag - they are written v<version>"
+               exit 1 ;;
+          esac
+          echo "tag=$v" >> "$GITHUB_OUTPUT"
+          echo "version=${v#v}" >> "$GITHUB_OUTPUT"
+
+      # **`ref:` is what makes the dispatch door safe, and its absence was a
+      # defect rather than an omission.** Without it a dispatch checks out the
+      # branch it was run from, so "re-run the release for v0.1.0" built whatever
+      # `main` was that day and pushed it as `0.1.0`, moving `latest` with it -
+      # green run, matching tag name, wrong bytes. A version is a promise about
+      # contents and that path could break it silently.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tags.outputs.tag }}
+
+      # And checked rather than trusted: a ref that resolved to anything but that
+      # tag's own commit stops here.
+      - name: the tree is that tag's
+        run: |
+          got=$(git describe --exact-match --tags HEAD 2>/dev/null || true)
+          if [ "$got" != "${{ steps.tags.outputs.tag }}" ]; then
+            echo "::error::HEAD is ${got:-no tag at all}, not ${{ steps.tags.outputs.tag }}"
+            exit 1
+          fi
+          echo "building ${{ steps.tags.outputs.tag }} at $(git rev-parse --short HEAD)"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # **Built and started before it is pushed, and that is the whole shape of
+      # this job.** This image stopped starting the day dashboards were added and
+      # stayed broken for a day, because its Dockerfile enumerates what it copies
+      # and nobody extended the list, so nothing noticed. A suite can hold the
+      # Dockerfile to the configuration beside it, and one does; only running the thing catches the rest.
+      - name: build it, into this runner rather than the registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/Dockerfile
+          load: true
+          push: false
+          tags: saguin-viewer:under-test
+
+      - name: start it and ask it for a page
+        run: |
+          # No broker: the viewer starts, serves the page, and says it is not
+          # connected. Which is the point - a container that cannot start is the
+          # failure this step is for, and it needs no broker to show itself.
+          docker run -d --name under-test -p 8080:8080 \
+            -e SAGUIN_VIEWER_LISTEN=0.0.0.0:8080 saguin-viewer:under-test
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8080/; then
+              echo "it serves a page"; break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "::error::the image did not serve a page in 30s"
+              docker logs under-test
+              exit 1
+            fi
+            sleep 0.5
+          done
+          # And the dashboards its configuration names are in it, which is the
+          # exact line that was missing when it broke.
+          docker exec under-test python3 -c "
+          import sys, yaml
+          cfg = yaml.safe_load(open('/viewer/saguin-viewer.yaml'))
+          import pathlib
+          missing = [p for p in (cfg.get('dashboard') or {}).values()
+                     if p != 'builtin' and not pathlib.Path('/viewer', p).exists()]
+          sys.exit('dashboards named by the configuration and not in the image: '
+                   + repr(missing) if missing else 0)"
+          echo "every dashboard its configuration names is in the image"
+          docker rm -f under-test
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # **The image that was tested is the image that is pushed**, by tagging the
+      # one already in this runner's daemon rather than building a second time.
+      # A second `build-push-action` was very likely identical on a warm cache,
+      # and "very likely" is not what a release gate is for: one cache miss
+      # between the two builds - a base image's digest moving mid-run is enough -
+      # and the bytes that ship are bytes nothing started, fetched a page from, or
+      # counted the dashboards inside.
+      #
+      # **The version and `latest` both.** A stack that wants reproducibility pins
+      # the version; one that wants the current viewer follows `latest`, which is
+      # what saguin's demos did when they built from source.
+      - name: push the image that was tested
+        run: |
+          set -eu
+          id=$(docker image inspect -f '{{.Id}}' saguin-viewer:under-test)
+          echo "pushing the image the gate ran: $id"
+          for t in "${{ steps.tags.outputs.version }}" latest; do
+            docker tag saguin-viewer:under-test "ghcr.io/ifnesi/saguin-viewer:$t"
+            docker push "ghcr.io/ifnesi/saguin-viewer:$t"
+          done

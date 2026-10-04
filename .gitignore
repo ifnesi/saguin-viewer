@@ -1,0 +1,8 @@
+# Python's caches, which the viewer's suite writes wherever it is run from.
+__pycache__/
+*.py[cod]
+
+# The virtualenv the web viewer's suite needs, and the binaries the Makefile
+# builds. Neither is a source file and both are rebuilt from what is.
+.venv/
+bin/

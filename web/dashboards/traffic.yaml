@@ -1,0 +1,127 @@
+# traffic.yaml - what is flowing through the broker, and what it refused.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the counters on the message path: what arrived,
+# what was stored, what went out, and every way a message did not reach
+# somebody. Clients and sessions are on their own tab, queues on theirs, and
+# what is on disk on the fourth.
+#
+# `width` is a span of 12 columns; cards flow and wrap to the window. `height`
+# is small | medium | large. A `break` starts a new row.
+
+title: "Traffic"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # What is flowing
+      Counters, so a line is drawn as a **rate** and a number is the total since the broker started. `publishes received` is what clients sent and inbound bridges carried in, the ones saguin went on to refuse included; `published` is what saguin accepted, on a channel or as broadcast - broadcast nobody subscribed to among it. Read against each other they say how much of what the fleet sends is landing: the gap between them is mostly the publishes refused, below.
+
+  - { type: break }
+  # **Uptime first, and on this tab.** Every counter below is "since the
+  # broker started", so the first thing to know is how long that has been:
+  # a hundred refused publishes over a month and a hundred since a restart
+  # ten minutes ago are not the same reading.
+  - { type: stat, width: 2, title: "Uptime", metric: saguin_uptime_seconds, format: duration }
+  - { type: stat, width: 5, title: "Publishes received", metric: saguin_publishes_received_total, sparkline: true }
+  - { type: stat, width: 5, title: "Published",          metric: saguin_published_total,          sparkline: true }
+  - { type: break }
+  - { type: stat, width: 3, title: "Deliveries sent",    metric: saguin_deliveries_sent_total,    sparkline: true }
+  - { type: stat, width: 3, title: "Unmatched broadcast", metric: saguin_broadcast_unmatched_total,
+      note: "Published to a topic no channel claims and nobody was subscribed to" }
+  - { type: stat, width: 3, title: "Bytes in",  metric: saguin_bytes_received_total, format: bytes }
+  - { type: stat, width: 3, title: "Bytes out", metric: saguin_bytes_sent_total,     format: bytes }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Publishes arriving",
+      metric: saguin_publishes_received_total, mode: rate, format: msgs_rate, color: series-1 }
+  - { type: timeseries, width: 6, height: medium, title: "Deliveries going out",
+      metric: saguin_deliveries_sent_total, mode: rate, format: msgs_rate, color: series-2 }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Bytes in",
+      metric: saguin_bytes_received_total, mode: rate, format: bytes_rate, color: series-3 }
+  - { type: timeseries, width: 6, height: medium, title: "Bytes out",
+      metric: saguin_bytes_sent_total, mode: rate, format: bytes_rate, color: series-4 }
+
+  - { type: break }
+  - type: heading
+    text: "What did not get through"
+
+  - { type: break }
+  # **Four different failures, and they are not interchangeable.** A refused
+  # publish never entered the broker; a dropped delivery entered and could not
+  # be written to a slow client; an expired one waited past its deadline; a
+  # refused delivery is broadcast to a subscriber that had not acknowledged
+  # enough of what it already had, or had run through its packet identifiers.
+  # An operator reading one of these needs to know which it is.
+  - { type: stat, width: 3, title: "Publishes refused",   metric: saguin_publish_refused_total,     alarm: "> 0" }
+  - { type: stat, width: 3, title: "Deliveries dropped",  metric: saguin_deliveries_dropped_total,  alarm: "> 0" }
+  - { type: stat, width: 3, title: "Deliveries refused",  metric: saguin_deliveries_refused_total,  alarm: "> 0" }
+  - { type: stat, width: 3, title: "Deliveries expired",  metric: saguin_deliveries_expired_total,  alarm: "> 0" }
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Why a publish was refused",
+      metric: saguin_publish_refused_total, by: reason, severity: warning }
+  # One count for each filter a SUBACK refused, by the code's name, read before
+  # a 3.1.1 client's answer is written as 0x80. No series until the first
+  # refusal. The subscribing half of "why is this device getting nothing".
+  - { type: breakdown, width: 6, height: medium, title: "Why a subscription was refused",
+      metric: saguin_subscriptions_refused_total, by: reason, severity: warning }
+
+  - { type: break }
+  # **The fifth way, one layer further on: a delivery that no session ever
+  # received.** Five causes, five different fixes. storage_full: the provider
+  # broker.session.storage names was full, so the oldest of the broadcast log
+  # went and this session was owed it. session_queue_full: at
+  # limits.session_queue_bytes, the oldest the session was owed that was not
+  # on the wire given up. no_shared_member: a shared group had no member that
+  # could take the message. packet_ids_exhausted: refused with no packet
+  # identifier left. too_large: larger than the client's Maximum Packet Size,
+  # so discarded rather than sent. A full client window is none of them: that
+  # is a refused delivery, above.
+  - { type: stat, width: 3, title: "Session deliveries dropped", metric: saguin_session_deliveries_dropped_total, alarm: "> 0" }
+  - { type: breakdown, width: 9, height: medium, title: "Why a session never received a delivery",
+      metric: saguin_session_deliveries_dropped_total, by: cause, severity: warning }
+
+  - { type: break }
+  # **Not a loss, and the only reading of a latest subscriber's pace.** A value
+  # on a latest channel a subscriber was not sent because a newer one for the
+  # same topic took its place while it waited: every subscriber is sent what
+  # is current. Only latest channels carry the series, so only they are split.
+  - { type: stat, width: 3, title: "Latest values superseded", metric: saguin_latest_superseded_total,
+      note: "A subscriber reading more slowly than its topics change - it is sent what is current" }
+  - { type: breakdown, width: 9, height: medium, title: "Superseded before a subscriber was sent them, by channel",
+      metric: saguin_latest_superseded_total, by: channel }
+
+  - { type: break }
+  - type: heading
+    text: "What shared groups are holding, and what they let go"
+
+  - { type: break }
+  # **Held minus drained minus dropped is exactly what the groups hold**
+  # (RFC 0005), so that is the first card: the three counters only climb, and
+  # the number an operator wants is the one none of them is. Drained flat while
+  # held climbs is a fleet that is not coming back, and the backlog is spending
+  # its provider until one does.
+  #
+  # A group over an append or latest channel is counted exactly as one over a
+  # broadcast topic: what it is owed is held as copies in the broadcast log.
+  - { type: stat, width: 3, title: "Holding now", metric: saguin_shares_held_total,
+      minus: [saguin_shares_drained_total, saguin_shares_dropped_total],
+      note: "Held, less drained and dropped: what the groups hold" }
+  - { type: stat, width: 3, title: "Put on a group's list", metric: saguin_shares_held_total,
+      note: "QoS 1 or 2, owed to a group with a member whose session outlives its connection" }
+  - { type: stat, width: 3, title: "Handed to a member", metric: saguin_shares_drained_total,
+      note: "The only way a delivery leaves a list except by being dropped" }
+  - { type: stat, width: 3, title: "Let go", metric: saguin_shares_dropped_total, alarm: "> 0",
+      note: "Six causes, below" }
+
+  - { type: break }
+  - { type: breakdown, width: 12, height: medium, title: "Why a group let a delivery go",
+      metric: saguin_shares_dropped_total, by: cause, severity: warning }
+
+  - { type: break }
+  - { type: alerts, width: 12 }

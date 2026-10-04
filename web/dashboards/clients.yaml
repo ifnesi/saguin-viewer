@@ -1,0 +1,123 @@
+# clients.yaml - who is connected, what they are subscribed to, and what
+# happens to a session when they leave.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the connection and session families. The message
+# path is on Traffic, queues on Queues, and what is on disk on Storage.
+
+title: "Clients"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Who is connected
+      A **held session** is a client that has gone with its state kept, which is what a session is for - the device comes back and resumes where it was. A number that only climbs is sessions nothing is coming back for, and each one is holding a position and its unacknowledged records.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Connected now",     metric: saguin_connections,       sparkline: true }
+  - { type: stat, width: 3, title: "Connections ever",  metric: saguin_connections_total,
+      note: "Since the broker started - a number climbing fast beside a flat 'connected now' is a client reconnecting in a loop" }
+  - { type: stat, width: 3, title: "Subscriptions",     metric: saguin_subscriptions,     sparkline: true }
+  - { type: stat, width: 3, title: "Held sessions",     metric: saguin_sessions_offline }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Connections",
+      metric: saguin_connections, color: series-1 }
+  - { type: timeseries, width: 6, height: medium, title: "Subscriptions",
+      metric: saguin_subscriptions, color: series-2 }
+
+  - { type: break }
+  - { type: breakdown, width: 12, height: medium, title: "By protocol",
+      metric: saguin_connections_by_protocol, by: protocol }
+  # Every connection the broker turned away, on any protocol: a CONNECT
+  # refused, or a connection ended for a refusal.
+  - { type: breakdown, width: 12, height: medium, title: "Connections refused, and why",
+      metric: saguin_connections_refused_total, by: reason, severity: warning }
+
+  - { type: break }
+  # **A count of readers that declared a slice of a channel, and nothing
+  # more.** Client-declared partitioning lets several subscribers split one
+  # filter between them, each naming its own slice on its SUBSCRIBE
+  # (RFC 0003). This is the denominator for that: how many are doing it,
+  # per channel.
+  #
+  # **It deliberately does not show coverage**, which is the number an
+  # operator would want and the broker cannot honestly answer: a slice
+  # nobody claims is indistinguishable from a member that has not connected
+  # yet, so a panel implying it would read as an alert during every rolling
+  # restart. The one thing that is detectable - two readers on one filter
+  # declaring different sizes for the space - cannot be correct and is a
+  # WARN in the broker's log rather than a number here.
+  #
+  # Which client declared which slices is on /v1/operations/sessions. It is
+  # not a metric because a count and an index are chosen by the client, and
+  # every label here is bounded by something the operator typed.
+  - { type: breakdown, width: 12, height: medium, title: "Partitioned readers, by channel",
+      metric: saguin_channel_partitioned_consumers, by: channel }
+
+  - { type: break }
+  - type: heading
+    text: "Sessions and what the broker keeps for them"
+
+  - { type: break }
+  - { type: stat, width: 4, title: "Session expiry shortened", metric: saguin_session_expiry_shortened_total,
+      note: "Clients that asked to be remembered for longer than max_session_expiry and were told a smaller number" }
+  - { type: stat, width: 4, title: "Longest session kept", metric: saguin_max_session_expiry_seconds, format: duration }
+  - { type: stat, width: 4, title: "Retained messages", metric: saguin_retained_messages,
+      note: "One slot per broadcast topic - not a latest channel's values, which belong to their channel" }
+
+  - { type: break }
+  # **What the last start did to the sessions this broker inherited.** Both
+  # numbers move once, when the broker starts, and then stand still - so they
+  # are stats rather than lines: a chart of a number that changes once is a
+  # flat line with a step nobody is watching for.
+  #
+  # Restored none, on a broker whose clients ask for persistent sessions, is
+  # a session store that did not keep them: a memory provider with no
+  # snapshot_dir, or one a crash stopped rather than a signal.
+  - { type: stat, width: 4, title: "Sessions restored at the start", metric: saguin_sessions_restored_total,
+      note: "Put back from broker.session.storage when this broker started, and answered Session Present 1 when their clients came back" }
+  - { type: stat, width: 8, title: "Sessions the broker could not keep", metric: saguin_sessions_dropped_total,
+      alarm: "> 0",
+      note: "A full provider at CONNECT, an expiry that passed while the broker was stopped, or a subscription this broker's rules now refuse" }
+
+  - { type: break }
+  - { type: breakdown, width: 12, height: medium, title: "Sessions not kept, and why",
+      metric: saguin_sessions_dropped_total, by: cause, severity: warning }
+
+  - { type: break }
+  - type: heading
+    text: "What the broker says when a client goes"
+
+  - { type: break }
+  # **A Will is the one message a broker sends on a client's behalf**, so
+  # these three answer "is my fleet dying, and does the broker say so":
+  # waiting is deaths held and not yet announced, cancelled is the delay
+  # doing its job - a device that came back inside its interval - and the
+  # breakdown is which rule made each announcement due.
+  #
+  # Nothing is published because the broker itself stopped, so a restart
+  # moves none of them for the clients it disconnects.
+  - { type: stat, width: 4, title: "Deaths waiting to be announced", metric: saguin_wills_waiting,
+      sparkline: true,
+      note: "Clients that have gone with a Will Delay Interval still running - held in broker.session.storage, so a restart inside the wait does not lose them" }
+  - { type: stat, width: 4, title: "Wills cancelled by a reconnect", metric: saguin_wills_cancelled_total,
+      note: "The delay working: the device came back inside its interval, so nothing was announced" }
+  - { type: stat, width: 4, title: "Wills published", metric: saguin_wills_published_total,
+      note: "Announcements this broker made on a client's behalf, by every rule together. A Will refused when it fired - a full channel, a storage failure - is logged and not counted" }
+
+  - { type: break }
+  - { type: breakdown, width: 12, height: medium, title: "Wills published, and what made each due",
+      metric: saguin_wills_published_total, by: cause }
+
+  - { type: break }
+  # **What every session holds that its client has not acknowledged**: on the
+  # wire, waiting for room in the client's window, or queued while it is away.
+  # One session is bounded by limits.session_queue_bytes; this is all of them.
+  - { type: timeseries, width: 6, height: medium, title: "Deliveries sessions hold",
+      metric: saguin_session_queue_messages, color: series-3 }
+  - { type: timeseries, width: 6, height: medium, title: "Memory those deliveries take",
+      metric: saguin_session_queue_bytes, format: bytes, color: series-4 }
+

@@ -1,0 +1,51 @@
+# runtime.yaml - the Go runtime under the broker: how often it collects
+# garbage, what that costs, and what the process holds.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the ten `saguin_go_*` series (RFC 0005, "The Go
+# runtime"), which Sagüin reads from the Go runtime when it is scraped.
+#
+# **Collections a second comes first**, because it is the figure that shows a
+# regression: a small heap collecting dozens of times a second costs a large
+# share of the broker's CPU while every other number looks ordinary.
+
+title: "Runtime"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # The Go runtime
+      Counters are drawn as **rates** and the total since the broker started sits beside them. Collections a second is the one to watch: it rising with the same traffic is a regression. The CPU lines are fractions of one processor and an upper bound, since the runtime counts a pause as every processor's time.
+
+  - { type: break }
+  - { type: timeseries, width: 8, height: medium, title: "Collections a second",
+      metric: saguin_go_gc_cycles_total, mode: rate, format: msgs_rate, color: series-1 }
+  - { type: stat, width: 4, title: "Collections since start", metric: saguin_go_gc_cycles_total }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "CPU spent collecting",
+      metric: saguin_go_gc_cpu_seconds_total, mode: rate, format: percent, color: series-2 }
+  - { type: timeseries, width: 6, height: medium, title: "CPU spent on assists",
+      metric: saguin_go_gc_assist_cpu_seconds_total, mode: rate, format: percent, color: series-3,
+      note: "The part of collecting the broker's own goroutines did, on a client's or a publisher's path" }
+
+  - { type: break }
+  - { type: meter, width: 6, title: "Heap live against the next collection",
+      value: saguin_go_heap_live_bytes, max: saguin_go_heap_goal_bytes, label: "live at the last collection, 8 MB floor included, of the goal" }
+  - { type: timeseries, width: 6, height: medium, title: "Goroutine stacks",
+      metric: saguin_go_stack_bytes, mode: level, format: bytes, color: series-4,
+      note: "Most of what an idle connection costs" }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Bytes allocated a second",
+      metric: saguin_go_allocated_bytes_total, mode: rate, format: bytes_rate, color: series-1 }
+  - { type: timeseries, width: 6, height: medium, title: "Objects allocated a second",
+      metric: saguin_go_allocated_objects_total, mode: rate, format: msgs_rate, color: series-2 }
+
+  - { type: break }
+  - { type: stat, width: 6, title: "GOGC", metric: saguin_go_gogc_percent,
+      note: "The effective setting: 100 unless set, -1 when collection is off" }
+  - { type: stat, width: 6, title: "GOMEMLIMIT", metric: saguin_go_memory_limit_bytes,
+      note: "none when no limit is set" }

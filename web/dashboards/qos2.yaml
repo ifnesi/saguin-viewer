@@ -1,0 +1,53 @@
+# qos2.yaml - exactly-once publishing: what is held, and what never finished.
+#
+# One of seven dashboards that between them draw every metric saguin exports
+# exactly once. This one owns the `saguin_qos2_*` family.
+#
+# **Every saguin offers exactly-once**, so every card here has data; the
+# `broker.qos2` block only changes where unfinished publishes wait and how
+# many one client may hold. A client the acl_file denies `qos2` never adds to
+# them. The cards stay empty only against a saguin old enough to switch QoS 2
+# off by leaving the block out.
+#
+# **No card names a client**, for the reason no card elsewhere names a
+# channel or a provider: the allowance is per client and the broker
+# deliberately publishes no per-client series, because the label would be a
+# string the client chose.
+
+title: "QoS 2"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Exactly-once, and where the unfinished ones wait
+      QoS 2 is a four-packet exchange. The publisher sends the message, the broker answers a receipt, the publisher sends a release, the broker answers a completion. Ownership passes to the broker at the **receipt**, a full round trip before the publisher learns it is done - so a broker running QoS 2 is holding messages nobody has finished sending, and `broker.qos2` is where they wait.
+
+      The record is written when the **release** arrives, not when the message does. So *held* is work in progress rather than data: it should rise and fall with traffic and come back to nothing. A figure that climbs and stays is publishers opening exchanges and not finishing them.
+
+  - { type: break }
+  - { type: stat, width: 4, title: "Held now", metric: saguin_qos2_held,
+      note: "Messages taken in and not yet released. Rises and falls with traffic; a floor that never returns to nothing is publishers not completing exchanges" }
+  - { type: stat, width: 4, title: "Allowance, per client",
+      metric: saguin_qos2_max_inflight_per_client,
+      note: "broker.qos2.max_inflight_per_client. Past it a publisher's next exactly-once message is refused 0x97 on its receipt and the connection is left alone" }
+  - { type: stat, width: 4, title: "Never finished", metric: saguin_qos2_abandoned_total,
+      alarm: "> 0",
+      note: "Taken in and never released - the session ended, or it aged past expires_after. The publisher is told nothing, so this is the only place it is visible" }
+
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Held over time",
+      metric: saguin_qos2_held }
+  - { type: timeseries, width: 6, height: medium, title: "Never finished, over time",
+      metric: saguin_qos2_abandoned_total }
+
+  - { type: break }
+  - type: text
+    markdown: |
+      ## Reading these together
+      **Held against the allowance.** The allowance is per client and this figure is the whole broker, so they do not divide into each other - what the pair says is whether one publisher could be responsible for all of it. Held sitting at or just under the allowance, with one busy publisher, is a client at its bound rather than a broker at one.
+
+      **Never finished is not a loss of data.** Nothing was stored, so nothing was lost from a channel; what happened is that a publisher was left believing its publish failed, which it did. Its retry lands once. A rate that climbs is worth chasing at the publisher rather than at the broker: a link that drops between the receipt and the release, or a client that never sends the release at all.
+
+      **A refusal at the allowance is counted elsewhere**, under `inflight allowance exceeded` on the Traffic tab's refusals. It is split out from `quota exceeded` because the two send an operator to opposite places: a client holding its allowance is a client to look at, and a full channel is storage to look at.

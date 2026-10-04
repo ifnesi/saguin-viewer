@@ -1,0 +1,17 @@
+saguin 0.1.0  broker_id edge-07  /run/saguin/operations.sock
+read 12s ago, redrawing every 1m (30s in the dashboard, raised to the broker's),
+  broker recomputes every 1m
+
+Clients
+  uptime_seconds 1d 2h    connections 41    sessions_offline 6
+  subscriptions 118
+
+Channels
+  channel      records      bytes  next_offset   behind  data lost  per record
+  events     1,204,882  412.1 MiB    1,204,883  304,885        yes       359 B
+  jobs             412    1.1 MiB          413        -          -     2.7 KiB
+  telemetry     88,301   31.4 MiB       88,302      302          -       373 B
+
+Queues
+  channel  queue_depth
+  jobs             412
