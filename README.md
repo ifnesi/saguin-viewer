@@ -1,5 +1,10 @@
 # saguin-viewer
 
+[![check](https://github.com/ifnesi/saguin-viewer/actions/workflows/check.yml/badge.svg)](https://github.com/ifnesi/saguin-viewer/actions/workflows/check.yml)
+[![tag](https://img.shields.io/github/v/tag/ifnesi/saguin-viewer?sort=semver)](https://github.com/ifnesi/saguin-viewer/tags)
+[![licence](https://img.shields.io/github/license/ifnesi/saguin-viewer)](LICENSE)
+[![image](https://img.shields.io/badge/image-ghcr.io%2Fifnesi%2Fsaguin--viewer-blue)](https://github.com/ifnesi/saguin-viewer/pkgs/container/saguin-viewer)
+
 Two viewers for a [Sagüin](https://github.com/ifnesi/saguin) 0.2.0 broker.
 Both are clients of any broker rather than part of one: they read its
 operations listener and its MQTT `$saguin` topics, as Sagüin's design
