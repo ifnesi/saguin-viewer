@@ -11,7 +11,7 @@ import (
 // comparison over metric names and numbers.
 //
 // **What it deliberately cannot do.** No functions, no variables, no strings, no
-// `and` or `or`. The readings RFC 0005 says the catalogue exists for are a
+// `and` or `or`. The readings an operator most needs about a channel are a
 // subtraction and a comparison, and everything past that is a language rather
 // than a column - the point at which a dashboard file stops being readable by
 // somebody who did not write it. If `and` is ever needed it arrives with the

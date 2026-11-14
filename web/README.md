@@ -1,6 +1,6 @@
 # Sagüin-viewer
 
-An operator's window onto a running [Sagüin](https://github.com/ifnesi/saguin)
+An operator's window onto a running [Sagüin](https://github.com/ifnesi/saguin) 0.2.0
 broker: a topic
 tree, the messages on any topic, a publish form, a replay control, the
 sessions connected to it, the retained messages and dead letters it holds,
@@ -12,15 +12,16 @@ python3 -m venv ../.venv
 ../.venv/bin/python app.py saguin-viewer.yaml
 ```
 
-**The RFC numbers below are saguin's**, and its specification is not in this
-repository: [RFC 0002][r2] is the configuration and the broker's own rules,
-[RFC 0003][r3] the delivery semantics, [RFC 0005][r5] the operations listener and
-the metric catalogue this page draws. They are cited by number and section
-throughout.
+**Sagüin's specification is not in this repository**: [design.md][design] is
+the broker's behaviour - its channels, delivery, the `$saguin` topics and the
+operations listener - [config.md][config] its configuration and
+[metrics.md][metrics] every series this page draws, each also served by the
+broker as its `HELP` line. They are cited by document and section throughout.
+This version reads 0.2.0 only; it does not work with an rc1 broker.
 
-[r2]: https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0002-channels-and-configuration.md
-[r3]: https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0003-delivery-semantics.md
-[r5]: https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0005-operations.md
+[design]: https://github.com/ifnesi/saguin/blob/main/docs/design.md
+[config]: https://github.com/ifnesi/saguin/blob/main/docs/config.md
+[metrics]: https://github.com/ifnesi/saguin/blob/main/docs/metrics.md
 
 One virtual environment at the top of the repository, which is also what
 `make viewer` runs the suite with; `requirements.txt` beside this file is the
@@ -188,7 +189,8 @@ default of a minute and the page says which it is using.
 ## The schema registry, which is a channel and an agreement
 
 **Sagüin has a schema registry and it needs nothing from the broker.** That
-is RFC 0003's point, and this viewer is a reader of it: a `latest` channel
+is the design's point ([design.md][design], *Channels*), and this viewer is a
+reader of it: a `latest` channel
 is already a key-value store with delete, so a registry is a channel and a
 convention.
 
@@ -405,13 +407,15 @@ becomes a **tab**, to the right of Topics, so several can be open at once.
 ```yaml
 # saguin-viewer.yaml - a mapping of tab name to file, in the order they appear
 dashboard:
-  Traffic: "dashboards/traffic.yaml"
-  Clients: "dashboards/clients.yaml"
-  Queues:  "dashboards/queues.yaml"
-  Storage: "dashboards/storage.yaml"
-  Bridges: "dashboards/bridge.yaml"
-  QoS 2:   "dashboards/qos2.yaml"
-  Runtime: "dashboards/runtime.yaml"
+  Process:    "dashboards/process.yaml"
+  Clients:    "dashboards/clients.yaml"
+  Publishing: "dashboards/publishing.yaml"
+  Delivery:   "dashboards/delivery.yaml"
+  Channels:   "dashboards/channels.yaml"
+  Queues:     "dashboards/queues.yaml"
+  Store:      "dashboards/store.yaml"
+  Bridges:    "dashboards/bridges.yaml"
+  Runtime:    "dashboards/runtime.yaml"
 ```
 
 The **key is the tab's name**, the **value is the file**; the tabs appear in
@@ -422,40 +426,42 @@ at startup - **a change to a file, or to which files, needs a restart**, which
 is how every other setting here works and is right for a personal instrument
 you run, look at, and close.
 
-**The seven shipped in `dashboards/` are a partition of what the broker
-exports**: every metric Sagüin publishes a number for appears on exactly one
-of them, and none appears on two. So a number has one place to be looked
-for, and a metric added to the broker is visibly missing rather than quietly
-absent from all seven. A test holds them to that.
+**The nine shipped in `dashboards/` are a partition of what the broker
+exports**: one tab per section of Sagüin's `docs/metrics.md`, every metric
+Sagüin publishes a number for on exactly one of them and none on two. So a
+number has one place to be looked for, and a metric added to the broker is
+visibly missing rather than quietly absent from all nine. A test holds them
+to that. Each card's description is the broker's own `HELP` line for its
+series.
 
-| tab | what it owns |
+| tab | metrics.md section |
 |---|---|
-| `traffic.yaml` | the message path - what arrived, what was stored, what went out, and every way a message did not reach somebody |
-| `clients.yaml` | connections, subscriptions, protocols, and what the broker keeps for a session that has gone |
-| `queues.yaml` | leases: depth, in flight, and the four ways work went round again or did not come back |
-| `storage.yaml` | what is held and where - records and bytes per channel, and each store's fill, commits and errors |
-| `bridge.yaml` | the links this broker dials: which are up, which gave up, and how much each has taken |
-| `qos2.yaml` | exactly-once publishing: what is held between a receipt and a release, and what was taken in and never finished. Every broker offers QoS 2 and carries these series, `broker.qos2` block or none |
-| `runtime.yaml` | the Go runtime under the broker: collections a second first, then what collecting costs in CPU, heap live against its goal, stacks, allocation, and GOGC and GOMEMLIMIT |
+| `process.yaml` | Process: readiness, goroutines, logging, reloads, operations requests |
+| `clients.yaml` | Connections and sessions |
+| `publishing.yaml` | Publishing |
+| `delivery.yaml` | Delivery |
+| `channels.yaml` | Channels and retained values |
+| `queues.yaml` | Queues |
+| `store.yaml` | Store and memory |
+| `bridges.yaml` | Bridges |
+| `runtime.yaml` | Go runtime |
 
 **A card with nothing to draw says so rather than disappearing.** Several
 families carry no series until something happens - the broker publishes none
-for `saguin_storage_errors_total` until a provider has actually failed, which
-is deliberate - and a card that vanished would leave a reader unable to tell
+for `saguin_channel_position_min` until a durable consumer holds a position -
+and a card that vanished would leave a reader unable to tell
 "nothing has failed" from "I have mistyped the metric". So it stays, with a
 dash and a line saying the broker publishes no series for it yet.
 
-**No shipped card names a provider, a channel, a queue or a bridge**, so every
-one of them runs against any broker. Where Sagüin labels a metric per store,
-the card is a split rather than a value: a split is over every one of them and
-names none, while a meter comparing one store's fill with its own bound has to
-say which store - so that form takes a `{provider="..."}` selector and a
-breakdown refuses one. A test holds every shipped dashboard to naming nothing.
+**No shipped card names a channel, a queue or a bridge**, so every one of them
+runs against any broker. Where Sagüin labels a metric per channel, queue or
+bridge, the card is a split over all of them rather than a value, and names
+none. A test holds every shipped dashboard to naming nothing.
 
 Copying one is the way to start; between them they use every card type. The
 four `*_info` families are on none of them, and cannot be: each is the
-constant 1 with its facts in labels - a build's version, a channel's filter, a
-provider's kind, a bridge's upstream - so a chart of one is a flat line at
+constant 1 with its facts in labels - a build's version, a channel's filter, the
+store's mode, a bridge's upstream - so a chart of one is a flat line at
 one. What they carry is on the page already, in the header and in the
 `channels`, `storage` and `bridges` widgets, which read the same scrape.
 
@@ -496,13 +502,13 @@ table); you place and size them, but they draw themselves.
 | `text` | your own words | `markdown` (see below) |
 | `heading` | a section label | `text` |
 | `channels` | the per-channel table | - |
-| `storage` | per-provider fill meters and commit notes | - |
+| `storage` | the store's database and log sizes, its mode, records per commit, and a full disk | - |
 | `bridges` | the upstream-link table | - |
 | `queues` | one card per queue | - |
 | `alerts` | whatever alert is firing, or nothing | - |
 
 **A card names a metric, and the name is checked before the viewer starts.**
-A card may name any metric Sagüin publishes a number for - all seventy-eight of
+A card may name any metric Sagüin publishes a number for - all eighty-three of
 them - and a card is refused, with a **startup error naming the card and the
 reason**, when it asks for something the renderer cannot honour: a metric
 outside the set, a `rate` or sparkline of a metric that keeps no history, a
@@ -512,20 +518,16 @@ take one. A dashboard that loads is a dashboard that draws; there is no card
 that renders as a silent blank.
 
 **`minus:` draws a stat's metric less others**, each a single value, for the
-figure no one metric carries: the shipped traffic dashboard's "Holding now" is
-`saguin_shares_held_total` minus drained and dropped, which RFC 0005 says is
-exactly what shared groups hold. One unknown operand makes the card a dash
+figure no one metric carries - for example `saguin_memory_max_bytes` minus
+`saguin_memory_in_transit_bytes`, the message memory still free. One unknown
+operand makes the card a dash
 rather than a wrong number, and a `minus` card takes no sparkline, whose
 history would be the first metric's alone.
 
-**The only metrics that take a selector are the provider ones**, and whether
-they need one depends on what is being asked. A `stat` or a `meter` is one
-number and has to say which store -
-`saguin_provider_bytes{provider="durable"}` - so a bare name there is refused.
-A `breakdown` of the same family is over every store and must *not* name one,
-so a selector there is refused instead: that is what lets the shipped
-dashboards draw per-store metrics without naming a store that exists on one
-broker and not another. Everything else is a bare family name.
+**A card names a bare family.** Sagüin 0.2.0 has one store, so no series needs a
+selector to say which; a card with a `{label="..."}` selector is refused rather
+than accepted and ignored. A split by a label is a `breakdown`, over every value
+of it, and an alarm may name one series with a selector (below).
 
 **A widget with nothing to say draws nothing; a metric card says so.** The
 difference is what the reader can conclude. A widget with an empty dataset -
@@ -570,9 +572,9 @@ usually what you want from "has this ever happened", and never what you want
 from "is this happening now".
 
 A metric the broker is not exporting reads as absent rather than as zero, so
-`< n` does not fire on a provider that is not running. Where the reference names
-one of several - `saguin_provider_bytes{provider="durable"}` - the selector is
-honoured, and the value compared is that one's, not the total.
+`< n` does not fire on a series the broker is not publishing. Where the reference names
+one of several - `saguin_bridge_connected{bridge="head-office"}` - the selector
+is honoured, and the value compared is that one's, not the total.
 
 To change what fires, edit the dashboard file and restart the viewer; the cards
 are validated at startup, so a threshold the page cannot evaluate stops it there
@@ -675,8 +677,8 @@ one reconnection - which is what makes it safe to put behind a button.
 otherwise. The device comes back with whatever the broker's password file
 and `acl_file` say at that moment. Taking a device's access away is: edit
 those two files, signal the broker to re-read them, then hang the client up
-so it connects again and is refused (RFC 0002, *Withdrawing a device's
-access*). What the button is for on its own is a client that is stuck - and
+so it connects again and is refused ([design.md][design], *Access and
+reload*). What the button is for on its own is a client that is stuck - and
 on a queue that is not cosmetic, because the jobs it was holding go back for
 another worker when its connection ends.
 
@@ -685,7 +687,8 @@ somebody may hang up a client is an authorization question, and the broker
 answers those in exactly one place - a verb on the read-only operations
 listener would need a second answer to it, kept in step with the ACL for
 ever. So the page publishes to `$saguin/sessions/disconnect`, and the broker
-answers on the reply topic (RFC 0002, *Hanging up a client*).
+answers on the reply topic, `hung-up` or `no-such-client` ([design.md][design],
+*`$saguin` topics*).
 
 **It needs a grant the viewer will not have by default.** `disconnect` is a
 `broker: sessions` rule - a rule kind of its own, which no channel or topic
@@ -705,12 +708,9 @@ that reader's claim on them goes with them. **Who lost records** in the sidebar
 names the readers it happened to and how much each lost, worst first by
 records lost, from `/v1/operations/position-lost`.
 
-**The counter cannot answer it.** `saguin_channel_position_lost_total` is one
-number per channel and it counts occurrences rather than readers - the floor
-overtakes the same lagging reader thousands of times in a busy run - so a rate
-that will not come down says how much and never which one. A series keyed by
-client id is not available to it either, for the reason the consumers route
-exists: a client chooses its own id.
+**No metric can answer it.** A series keyed by client id is not available, for
+the reason the consumers route exists: a client chooses its own id. So the
+page asks the route, which names the readers.
 
 **A reader is named with its scheme, and the page shows it whole.** A
 position is stored under `mqtt:<client id>` for an MQTT session and
@@ -936,7 +936,7 @@ that history exactly once, ever.
 position to move, so the session outlives the connection by
 `session_expiry`. That means this viewer appears in
 `/v1/operations/consumers` by name, and a viewer seeked back to an old offset
-lowers `saguin_channel_consumer_position_min` - the number Sagüin's one standing
+lowers `saguin_channel_position_min` - the number Sagüin's one standing
 alert is built on. The client id is recognisable on purpose.
 
 **Publishing uses a connection of its own.** Several MQTT refusals end the
@@ -959,9 +959,9 @@ from the page itself.
 **Broadcast topics are not stored anywhere**, so none replays when the viewer
 connects - they appear as messages flow, and they are gone when it restarts.
 The one exception is a retained value: the broker's retained store always
-exists - `broker.retained` only changes which provider holds it and for how
-long - and `0x9A` refuses a retained publish only from a client whose roles
-deny `retained` ([RFC 0002][r2], *Retained messages on a broadcast topic*).
+exists - `broker.retained` only sets its limits and how long a value is
+kept - and `0x9A` refuses a retained publish only from a client whose roles
+deny `retained` ([design.md][design], *Access and reload*).
 
 **MQTT 3.1.1 is selectable, and what changes is not what you might expect.**
 Where a subscriber starts is the *channel's* business: a channel writing
@@ -1019,16 +1019,16 @@ cannot import - without it the suite is silently not found, which looks
 exactly like a suite that passed.
 
 They run against no broker except where they say so, and two say so. Both need
-saguin's own checkout - `SAGUIN_REPO`, or a sibling `../saguin` with `bin/saguin`
-built - and both skip with a message naming what to build where there is none.
+Sagüin's own checkout - `SAGUIN_REPO`, or a sibling `../saguin` with
+`bin/saguin` built - and both skip with a message naming what to build where there is none.
 **A skip is a weaker run rather than a passing one**: these two are what hold this
 viewer to a broker instead of to a document.
 
 * One compares this viewer's topic-to-channel matching against `saguin --route`,
   which is what keeps the two from deciding differently where a record lands.
 * The other starts a real broker, drives it until it publishes every metric it
-  can, and fails if RFC 0005's catalogue, that broker's scrape, `ALLOWED_METRICS`
-  and the shipped dashboards disagree in any direction. It also reads RFC 0005
+  can, and fails if `metrics.md`, that broker's scrape, `ALLOWED_METRICS` and the
+  shipped dashboards disagree in any direction. It reads `docs/metrics.md`
   itself, so it needs the checkout for the document as well as the binary.
 
 Three more skip without `node`, which drives `static/app.js` directly.

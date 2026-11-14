@@ -31,7 +31,7 @@ const (
 //	metrics:
 //	  - saguin_channel_records
 //	  - name: lag
-//	    value: saguin_channel_next_offset - saguin_channel_consumer_position_min
+//	    value: saguin_channel_next_offset - saguin_channel_position_min
 //
 // **A group with computed columns is a widget somebody defined**, which is why
 // there is no separate widget kind: the shape comes from the layout and the
@@ -284,8 +284,8 @@ func parseDashboard(body []byte, source string) (*Dashboard, error) {
 // Interval is how often to redraw, clamped up to what the broker says it
 // recomputes at and never below it.
 //
-// **Up, never down.** RFC 0005: a scrape arriving sooner than
-// min_scrape_interval is answered from the previous computation, so a shorter
+// **Up, never down.** The values the broker keeps in its store are re-read
+// every min_scrape_interval (config.md, broker.operations), so a shorter
 // refresh redraws the same numbers while the age on the screen resets - which
 // reads as a broker whose numbers have stopped moving. The screen says which
 // interval it settled on for the same reason.
@@ -347,7 +347,7 @@ func (d *Dashboard) Validate(s *Scrape) ([]string, error) {
 			if len(lost) > 0 {
 				// **Named once, however many columns wanted it.** In the shipped
 				// dashboard `behind` and `data lost` both read
-				// saguin_channel_consumer_position_min, so a broker nothing has
+				// saguin_channel_position_min, so a broker nothing has
 				// consumed from listed it twice - once per column that lost it.
 				g.absent = addOnce(g.absent, lost)
 				continue

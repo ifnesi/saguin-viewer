@@ -1,8 +1,10 @@
 # saguin-viewer
 
-Two viewers for a [saguin](https://github.com/ifnesi/saguin) broker. Both are
-clients of any broker rather than part of one: they read the operations
-listener RFC 0005 specifies, and nothing here runs inside saguin.
+Two viewers for a [Sagüin](https://github.com/ifnesi/saguin) 0.2.0 broker.
+Both are clients of any broker rather than part of one: they read its
+operations listener and its MQTT `$saguin` topics, as Sagüin's design
+specifies, and nothing here runs inside the broker. Sagüin 0.2.0 only: this version
+does not work with rc1.
 
 A look before you install: every message as it arrives, decoded through the
 broker's schema registry, and the broker's own numbers on a dashboard.
@@ -39,14 +41,17 @@ The web viewer's suite needs a virtualenv:
 broker and nothing here can stand in for one: the drift check between saguin's
 metric catalogue and what the viewers draw, the parser against a real scrape,
 both credential arrangements on the operations listener, and `saguin --route`.
-They look for a sibling `../saguin` with `bin/saguin` built; `SAGUIN_REPO` names
-it elsewhere. Absent, they skip and say what to build and set.
+They look for a sibling `../saguin` with `bin/saguin` built; `SAGUIN_REPO`
+names it elsewhere. Absent, they skip and say what to build and set.
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md). The short version: RFC 0005 is the
-specification for everything here, a metric neither viewer may draw until that
-document names it, and the drift test is what keeps the two in step.
+[CONTRIBUTING.md](CONTRIBUTING.md). The short version: Sagüin's design is the
+specification for everything here - `docs/design.md` (the operations listener,
+the `$saguin` topics), `docs/metrics.md` (every series and its meaning, which
+the broker also serves as each series' `HELP` line) and `docs/config.md`. Neither
+viewer may draw a metric `metrics.md` does not name, and the drift test is what
+keeps the two in step.
 
 ## Development approach
 

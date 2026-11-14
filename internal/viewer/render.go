@@ -32,8 +32,8 @@ func Width() int {
 type Screen struct {
 	Dashboard *Dashboard
 	Scrape    *Scrape
-	// Where is the socket or address this was read from. RFC 0005 notes that no
-	// metric carries a hostname, so this is the only thing here that says which
+	// Where is the socket or address this was read from. No metric carries a
+	// hostname (metrics.md), so this is the only thing here that says which
 	// broker - and it is what the reader typed.
 	Where string
 	Now   time.Time
@@ -91,7 +91,7 @@ func (s Screen) header(b *strings.Builder) {
 	switch {
 	case version == "" && id == "":
 		// A broker that served a catalogue without this is a broker that changed
-		// its mind about the one metric RFC 0005 says its version is stated in,
+		// its mind about the one metric its version is stated in (saguin_build_info),
 		// so say that rather than printing "saguin" with two gaps.
 		fmt.Fprintf(b, "saguin (no saguin_build_info in this scrape)  %s\n", s.Where)
 	default:
@@ -109,8 +109,8 @@ func (s Screen) header(b *strings.Builder) {
 	if !s.Once {
 		redraw := "redrawing every " + short(s.Interval)
 		if s.Interval != s.Written {
-			// The clamp, said out loud: RFC 0005 refuses to raise a configured
-			// interval quietly, and neither does this.
+			// The clamp, said out loud: an interval raised quietly would leave the
+			// reader believing the file, so this says it.
 			redraw += fmt.Sprintf(" (%s in the dashboard, raised to the broker's)",
 				short(s.Written))
 		}
@@ -278,9 +278,8 @@ func (s Screen) table(b *strings.Builder, g *Group) {
 // columns group.
 //
 // **An unknown value is a dash and never a zero**, whether it is a metric the
-// scrape has no sample of - RFC 0005 does not measure a `latest` channel's bytes,
-// so such a channel has none - or a computed column one of whose operands is
-// missing. A zero would say the channel holds nothing.
+// scrape has no sample of - a series the broker does not publish for that
+// channel - or a computed column one of whose operands is missing. A zero would say the channel holds nothing.
 func cell(c Column, resolve func(string) (float64, bool)) string {
 	if !c.Computed() {
 		v, ok := resolve(c.Metric)
@@ -296,7 +295,7 @@ func cell(c Column, resolve func(string) (float64, bool)) string {
 	if v.IsBool {
 		// **A condition reads as a word, and only when it is true.** The reason
 		// to compute `floor > position_min` at all is that it is the one alert
-		// RFC 0005 says the catalogue exists for, and a column of `no` with one
+		// an operator most needs, and a column of `no` with one
 		// `yes` in it hides the `yes`.
 		if v.Num != 0 {
 			return "yes"
@@ -439,8 +438,8 @@ func count(v float64) string {
 //
 // **KiB rather than kB**, because `max_bytes: 16MiB` is what an operator wrote
 // in the configuration file and a screen reporting 16.8 MB of it would be the
-// same number in a vocabulary the broker does not use. RFC 0005's own cost
-// tables are in KiB and MiB for the same reason.
+// same number in a vocabulary the broker does not use: Sagüin's configuration
+// writes sizes in KiB and MiB.
 func bytesOf(v float64) string {
 	if v < 0 {
 		return "-" + bytesOf(-v)

@@ -230,7 +230,7 @@ func TestTheShippedDefaultReportsWhatIsAbsentRatherThanRefusing(t *testing.T) {
 			"something should have been reported absent - an empty list here " +
 			"means this case is comparing nothing")
 	}
-	for _, want := range []string{"saguin_queue_depth", "saguin_bridge_connected"} {
+	for _, want := range []string{"saguin_queue_workers", "saguin_bridge_connected"} {
 		if !contains(absent, want) {
 			t.Errorf("%s is not served by the fixture and was not reported: %v",
 				want, absent)
@@ -291,8 +291,8 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// TestTheRefreshIsClampedUpAndNeverDown. RFC 0005: a scrape arriving sooner than
-// min_scrape_interval is answered from the previous computation, so a shorter
+// TestTheRefreshIsClampedUpAndNeverDown. The values the broker keeps in its
+// store are re-read every min_scrape_interval (config.md), so a shorter
 // refresh redraws the same numbers while the age on the screen resets - which
 // reads as a broker whose numbers have stopped moving.
 func TestTheRefreshIsClampedUpAndNeverDown(t *testing.T) {
@@ -320,13 +320,13 @@ func TestTheRefreshIsClampedUpAndNeverDown(t *testing.T) {
 	}
 }
 
-// TestTheShippedDefaultNamesOnlyMetricsRFC0005Promises. The catalogue is closed -
-// "a name here is a promise; a name not here is not published" - so a default
-// dashboard naming anything else is a panel that can never draw. The oracle is
-// the RFC rather than the broker, so this fails on a name that was invented here
-// even if some build happens to serve it.
-func TestTheShippedDefaultNamesOnlyMetricsRFC0005Promises(t *testing.T) {
-	catalogue := rfcCatalogue(t)
+// TestTheShippedDefaultNamesOnlyMetricsMetricsMdLists. metrics.md lists every
+// metric Sagüin exposes, so a default dashboard naming anything else is a panel
+// that can never draw. The oracle is the document rather than the broker, so
+// this fails on a name that was invented here even if some build happens to
+// serve it.
+func TestTheShippedDefaultNamesOnlyMetricsMetricsMdLists(t *testing.T) {
+	catalogue := metricsCatalogue(t)
 	d, err := Default()
 	if err != nil {
 		t.Fatal(err)
@@ -339,8 +339,8 @@ func TestTheShippedDefaultNamesOnlyMetricsRFC0005Promises(t *testing.T) {
 			for _, name := range c.Reads() {
 				named++
 				if !catalogue[name] {
-					t.Errorf("the shipped default names %s, which RFC 0005's "+
-						"catalogue does not promise", name)
+					t.Errorf("the shipped default names %s, which metrics.md "+
+						"does not list", name)
 				}
 			}
 		}
@@ -349,46 +349,39 @@ func TestTheShippedDefaultNamesOnlyMetricsRFC0005Promises(t *testing.T) {
 		t.Errorf("only %d metrics were checked, and the default names more than "+
 			"that - this case is reading a short list", named)
 	}
-	if len(d.Groups) != 8 {
-		t.Errorf("%d groups in the shipped default, want 8", len(d.Groups))
+	if len(d.Groups) != 7 {
+		t.Errorf("%d groups in the shipped default, want 7", len(d.Groups))
 	}
 }
 
-// rfcCatalogue reads the metric names RFC 0005 promises, between the catalogue's
-// own two headings - so the example scrape above it and the alert below cannot
-// contribute a name the catalogue does not.
-func rfcCatalogue(t *testing.T) map[string]bool {
+// metricsCatalogue reads the metric names Sagüin's metrics.md lists: every
+// row of its tables whose first cell names series, in backticks with their
+// labels in braces, one row sometimes naming two that share a meaning.
+func metricsCatalogue(t *testing.T) map[string]bool {
 	t.Helper()
 	root := os.Getenv("SAGUIN_REPO")
 	if root == "" {
 		root = filepath.Join("..", "..", "..", "saguin")
 	}
-	path := filepath.Join(root, "docs", "rfcs", "0005-operations.md")
+	path := filepath.Join(root, "docs", "metrics.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("no %s - RFC 0005 is the oracle for this, and it is in saguin's "+
+		t.Skipf("no %s - metrics.md is the oracle for this, and it is in Sagüin's "+
 			"own checkout: set SAGUIN_REPO if it is not beside this one", path)
 	}
-	text := string(body)
-	start := strings.Index(text, "\n### The catalogue\n")
-	if start < 0 {
-		t.Fatal("RFC 0005 has no `### The catalogue` heading, so this case cannot " +
-			"read its oracle")
-	}
-	end := strings.Index(text[start+1:], "\n### ")
-	if end < 0 {
-		t.Fatal("the catalogue section does not end at another heading")
-	}
-	rows := regexp.MustCompile(`(?m)^\| `+"`"+`(saguin_[a-z0-9_]+)`).
-		FindAllStringSubmatch(text[start:start+1+end], -1)
-	if len(rows) < 60 {
-		t.Fatalf("only %d metrics parsed out of RFC 0005's catalogue - the row "+
-			"shape has moved, and an oracle this short agrees with anything",
-			len(rows))
-	}
+	series := regexp.MustCompile("`(saguin_[a-z0-9_]+)(?:\\{[a-z_,]+\\})?`")
 	out := map[string]bool{}
-	for _, m := range rows {
-		out[m[1]] = true
+	for line := range strings.Lines(string(body)) {
+		if !strings.HasPrefix(line, "| `saguin_") {
+			continue
+		}
+		for _, m := range series.FindAllStringSubmatch(strings.Split(line, "|")[1], -1) {
+			out[m[1]] = true
+		}
+	}
+	if len(out) < 60 {
+		t.Fatalf("only %d metrics parsed out of metrics.md - the row shape has "+
+			"moved, and an oracle this short agrees with anything", len(out))
 	}
 	return out
 }
@@ -406,9 +399,9 @@ groups:
     metrics:
       - saguin_channel_records
       - name: behind
-        value: saguin_channel_next_offset - saguin_channel_consumer_position_min
+        value: saguin_channel_next_offset - saguin_channel_position_min
       - name: data lost
-        value: saguin_channel_floor_offset > saguin_channel_consumer_position_min
+        value: saguin_channel_floor_offset > saguin_channel_position_min
       - name: average record
         value: saguin_channel_bytes / saguin_channel_records
         format: bytes
@@ -549,7 +542,7 @@ func TestAComputedColumnDropsWholeWhenAnOperandIsAbsent(t *testing.T) {
 	}
 	// The fixture serves next_offset but no consumer position, so `behind` and
 	// `data lost` both go, and the operand they are missing is reported.
-	if !contains(absent, "saguin_channel_consumer_position_min") {
+	if !contains(absent, "saguin_channel_position_min") {
 		t.Errorf("the missing operand was not reported: %v", absent)
 	}
 	var channels *Group

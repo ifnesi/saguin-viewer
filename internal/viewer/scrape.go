@@ -11,18 +11,20 @@ import (
 	"time"
 )
 
-// DefaultSocket is the operations socket RFC 0005 and RFC 0002 write in every
-// example. It is where this looks when nothing names a door, because a local
+// DefaultSocket is the operations socket this looks for when nothing names a
+// door, because a local
 // reader on the broker's own box is what this tool is for.
 const DefaultSocket = "/run/saguin/operations.sock"
 
 // Source is one door onto a broker's operations listener: a Unix socket, or a
 // TCP address with whatever credential that door asks for.
 //
-// **The socket is the default and it usually needs no credential.** RFC 0005:
-// a door naming no password file anywhere has none, and the socket's file
-// permissions are what decide who may speak to it. A TCP listener on a routable
-// address always has one, because the broker refuses to start otherwise.
+// **The socket is the default and it needs no credential.** A request with none
+// reaches every route on a loopback address or a Unix socket, the socket's file
+// permissions deciding who may speak to it (design.md, Operations, Who may
+// call). A listener on a non-loopback address needs a password file or a client
+// certificate, because the broker refuses to start otherwise (config.md,
+// broker.operations).
 type Source struct {
 	// Socket is a filesystem path; Address is host:port. Exactly one is set.
 	Socket  string
@@ -58,8 +60,8 @@ func TCP(address, user, password string, timeout time.Duration) *Source {
 	}
 }
 
-// Where names the door, for the header. RFC 0005 notes that no metric carries a
-// hostname, so this is the only thing on the screen that says which broker was
+// Where names the door, for the header. No metric carries a hostname
+// (metrics.md), so this is the only thing on the screen that says which broker was
 // read - and it is what the reader typed rather than anything the broker said.
 func (s *Source) Where() string {
 	if s.Socket != "" {
@@ -70,9 +72,11 @@ func (s *Source) Where() string {
 
 func (s *Source) url(path string) string {
 	if s.Socket != "" {
-		// The host is unused - the transport dials the socket whatever it says -
-		// but net/http requires one, and "saguin" is what appears in an error.
-		return "http://saguin" + path
+		// The transport dials the socket whatever the host says, but the broker
+		// reads it: a request with no credential reaches every route on a Unix
+		// socket only when its Host is an IP literal or localhost (design.md,
+		// Operations, Who may call).
+		return "http://localhost" + path
 	}
 	return "http://" + s.Address + path
 }
@@ -83,10 +87,10 @@ func (s *Source) get(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// **Basic, in the request header**, which RFC 0005 chose because it is what
-	// every scraper already sends. Set only when a user was named: a door with
-	// no password file has no credential at all, and sending an empty one there
-	// is a credential that was offered and failed.
+	// **Basic, in the request header**, as every scraper already sends it
+	// (design.md, Operations, Who may call). Set only when a user was named: a
+	// credential that is offered is checked and does not fall back to none, so
+	// an empty one would be a credential offered and refused.
 	if s.User != "" {
 		req.SetBasicAuth(s.User, s.Password)
 	}
@@ -107,7 +111,8 @@ func (s *Source) get(path string) ([]byte, error) {
 	case http.StatusOK:
 		return body, nil
 	case http.StatusUnauthorized:
-		// RFC 0005 draws the line between these two, so the message does too: a
+		// The broker draws the line between these two (design.md, Operations,
+		// Who may call), so the message does too: a
 		// 401 says try again with a credential, a 403 says this one is correct
 		// and does not reach here. An operator told the wrong one checks the
 		// wrong thing.
@@ -143,13 +148,12 @@ func (s *Source) Scrape(at time.Time) (*Scrape, error) {
 
 // MinScrapeInterval asks the broker how often it recomputes.
 //
-// **`?section=operations` rather than the whole document**, which RFC 0005
-// warns is otherwise handed over in full: at ten thousand channels that route
-// answers with every channel's name, filter, type and provider, to read one
-// duration.
+// **`?section=operations` rather than the whole document**, which is otherwise
+// handed over in full: at ten thousand channels that route answers with every
+// channel, to read one duration.
 //
 // **The broker's answer is the only answer, and an absent one is an error.**
-// This carried RFC 0005's floor as a fallback while the resolved configuration
+// This carried a floor of its own as a fallback while the resolved configuration
 // omitted the key that had been left at its default - which saguin now fills in,
 // having reasoned that the fallback was "a second place for the number to be
 // wrong". It was: a screen clamped against a minute this program assumed, on a
@@ -174,7 +178,7 @@ func (s *Source) MinScrapeInterval() (time.Duration, error) {
 	if written == "" {
 		return 0, fmt.Errorf("%s, answering %s: the broker serves no "+
 			"min_scrape_interval. "+
-			"RFC 0005 says this route answers with every default filled in, so a "+
+			"the resolved configuration has every default filled in, so a "+
 			"broker that omits it is one from before saguin did that - build it "+
 			"again, or write the key in its configuration", s.Where(), route)
 	}

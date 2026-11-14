@@ -1,0 +1,24 @@
+# Delivery: the series metrics.md lists under "Delivery", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Delivery"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Delivery
+      Deliveries sent, awaiting acknowledgement, expired or missed, and exactly-once exchanges held or abandoned.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Deliveries expired", metric: saguin_deliveries_expired_total, alarm: "> 0" }
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Deliveries, a second",
+      metric: saguin_deliveries_total, mode: rate, format: msgs_rate }
+  - { type: timeseries, width: 6, height: medium, title: "Inflight",
+      metric: saguin_inflight, mode: level }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Missed",
+      metric: saguin_missed_total, by: cause, severity: warning }
+  - { type: breakdown, width: 6, height: medium, title: "Shares dropped",
+      metric: saguin_shares_dropped_total, by: channel, severity: warning }

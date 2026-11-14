@@ -19,12 +19,12 @@ func values(m map[string]float64) func(string) (float64, bool) {
 // a threshold nobody can choose for an operator, or a series per consumer.
 func TestTheTwoReadingsRFC0005AsksFor(t *testing.T) {
 	scrape := values(map[string]float64{
-		"saguin_channel_next_offset":           1204883,
-		"saguin_channel_floor_offset":          900000,
-		"saguin_channel_consumer_position_min": 899_998,
+		"saguin_channel_next_offset":  1204883,
+		"saguin_channel_floor_offset": 900000,
+		"saguin_channel_position_min": 899_998,
 	})
 
-	lag, err := ParseExpr("saguin_channel_next_offset - saguin_channel_consumer_position_min")
+	lag, err := ParseExpr("saguin_channel_next_offset - saguin_channel_position_min")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestTheTwoReadingsRFC0005AsksFor(t *testing.T) {
 		t.Errorf("lag is %+v, want 304885", got)
 	}
 
-	lost, err := ParseExpr("saguin_channel_floor_offset > saguin_channel_consumer_position_min")
+	lost, err := ParseExpr("saguin_channel_floor_offset > saguin_channel_position_min")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestTheTwoReadingsRFC0005AsksFor(t *testing.T) {
 	}
 	// And the other way, where nothing has been lost.
 	got = lost.Eval(values(map[string]float64{
-		"saguin_channel_floor_offset": 1, "saguin_channel_consumer_position_min": 5}))
+		"saguin_channel_floor_offset": 1, "saguin_channel_position_min": 5}))
 	if !got.Known || !got.IsBool || got.Num != 0 {
 		t.Errorf("the alert is %+v on a channel where nothing was lost", got)
 	}
@@ -55,7 +55,7 @@ func TestTheTwoReadingsRFC0005AsksFor(t *testing.T) {
 // number worked out from a zero that was never measured. A `latest` channel has
 // no bytes and no consumer position.
 func TestUnknownSpreads(t *testing.T) {
-	e, err := ParseExpr("saguin_channel_next_offset - saguin_channel_consumer_position_min")
+	e, err := ParseExpr("saguin_channel_next_offset - saguin_channel_position_min")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +129,11 @@ func TestPrecedenceAndParentheses(t *testing.T) {
 // of them to the scrape exactly as it holds a bare column - which is how a typo
 // inside a `value` is refused at startup rather than drawing a dash for ever.
 func TestTheMetricsAnExpressionReadsAreListedInOrder(t *testing.T) {
-	e, err := ParseExpr("saguin_channel_next_offset - saguin_channel_consumer_position_min + saguin_channel_next_offset / 2")
+	e, err := ParseExpr("saguin_channel_next_offset - saguin_channel_position_min + saguin_channel_next_offset / 2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"saguin_channel_next_offset", "saguin_channel_consumer_position_min"}
+	want := []string{"saguin_channel_next_offset", "saguin_channel_position_min"}
 	got := e.Metrics()
 	if len(got) != len(want) {
 		t.Fatalf("reads %v, want %v - a name written twice is one name", got, want)
@@ -183,7 +183,7 @@ func TestEveryWayAnExpressionIsRefused(t *testing.T) {
 }
 
 // TestWhatTheLanguageDeliberatelyDoesNotHave. These are refused on purpose
-// rather than by oversight: the two readings RFC 0005 asks for are a subtraction
+// rather than by oversight: the two readings an operator most needs are a subtraction
 // and a comparison, and everything past that is a language rather than a column.
 // If one of these is ever wanted it arrives with the failure that wanted it, and
 // this case is the record that its absence was a decision.

@@ -9,22 +9,21 @@ import (
 	"time"
 )
 
-// fixture is RFC 0005's own example scrape plus the label values the format
-// allows and that example does not show.
+// fixture is a scrape written for these tests plus the label values the format
+// allows that an ordinary scrape does not show.
 //
 // **The file carries no comment of its own**, and the first draft of it did:
 // the parser refused the header explaining where the lines came from, because a
 // comment that is neither HELP nor TYPE is a shape saguin does not write. That
 // is the check working, so the provenance is here instead.
 //
-// The ordinary lines are transcribed from RFC 0005's "What a scrape looks
-// like" - an append, a latest and a queue channel, one inbound bridge, a
+// The ordinary lines describe a small broker - an append, a latest and a queue channel, one inbound bridge, a
 // durable consumer behind the head, a worker holding three jobs, one broadcast
 // publish and one refused retain. The rest are what that example does not show
 // and the format allows on a label value: each of the three escapes, a
 // backslash before something else, an empty value, a negative number, and a
-// filter written with braces - which RFC 0005 says saguin_channel_info carries
-// "as written, braces and all".
+// filter written with braces, which saguin_channel_info carries as configured
+// (metrics.md).
 func fixture(t *testing.T) *Scrape {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("testdata", "metrics.txt"))
@@ -135,8 +134,8 @@ func TestANegativeValueSurvives(t *testing.T) {
 
 // TestAFilterKeepsItsBraces is the other defect the Python viewer shipped:
 // the label parser split on a comma and cut `iot/+/{status,location}/+` in
-// half. RFC 0005 says this metric carries the filter as written, braces and
-// all, precisely because a brace stands for several plain filters and one
+// half. This metric carries the filter as configured, braces and all
+// (metrics.md), because a brace stands for several plain filters and one
 // series cannot hold both.
 func TestAFilterKeepsItsBraces(t *testing.T) {
 	s := fixture(t)

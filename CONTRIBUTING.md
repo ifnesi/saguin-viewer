@@ -4,18 +4,22 @@ Contributions are welcome, and the barrier is deliberately low. This
 document is short because it should be.
 
 This repository holds two viewers for a
-[Sagüin](https://github.com/ifnesi/saguin) broker - a browser one in `web/`
-and a terminal one in `cmd/saguin-viewer`. Neither is part of the broker:
-both are clients of the operations listener
-[RFC 0005](https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0005-operations.md)
-specifies, and that document is the specification for everything here.
+[Sagüin](https://github.com/ifnesi/saguin) 0.2.0 broker - a browser one in
+`web/` and a terminal one in `cmd/saguin-viewer`. Neither is part of the
+broker: both are clients of its operations listener and its `$saguin` topics,
+and Sagüin's design is the specification for everything here:
+[design.md](https://github.com/ifnesi/saguin/blob/main/docs/design.md)
+for the broker's behaviour, the listener and the topics, and
+[metrics.md](https://github.com/ifnesi/saguin/blob/main/docs/metrics.md)
+for every series and its meaning.
 
 ## The most useful thing you can do today
 
 Both viewers are early, and the specification is ahead of them. So the
 highest-value contribution available right now is:
 
-**Read RFC 0005 beside a screen and tell us where the screen is wrong.**
+**Read metrics.md and design.md beside a screen and tell us where the screen
+is wrong.**
 
 No Go, no Python, no broker of your own - a careful reading of what a panel
 claims against what the catalogue actually promises. A number labelled as
@@ -24,34 +28,34 @@ nothing, a card that would draw an empty panel on any broker but the one it
 was written against: each is a defect, and each has been one here.
 
 Also welcome: documentation fixes, dashboards, and tests that assert
-something RFC 0005 states which nothing currently checks.
+something Sagüin's design states which nothing currently checks.
 
 ## The one rule that is unusual
 
 **Behaviour is specified before it is implemented, and the specification is
 in the other repository.** Every number either viewer draws is a metric or a
-route RFC 0005 names. If a change needs one that RFC 0005 does not state,
-the RFC changes first - in saguin, in an earlier pull request. Inventing a
+route Sagüin's design names. If a change needs one the design does not state,
+the design changes first - in saguin, in an earlier pull request. Inventing a
 metric here is how a viewer and a broker quietly stop agreeing about what a
 number means.
 
-Most changes need no RFC edit:
+Most changes need no design edit:
 
-| Change | RFC amendment in saguin? |
+| Change | Design change in saguin? |
 |---|---|
-| Bug fix, so a viewer matches what RFC 0005 already says | No |
+| Bug fix, so a viewer matches what the design already says | No |
 | Tests, docs, comments, dashboards, refactors | No |
-| A column or panel computed from metrics RFC 0005 names | No |
+| A column or panel computed from metrics metrics.md names | No |
 | Drawing a metric the catalogue does not carry | **Yes** |
 | Reading a route the operations listener does not serve | **Yes** |
-| Resolving an ambiguity you found in RFC 0005 | **Yes** - that *is* the fix |
+| Resolving an ambiguity you found in the design | **Yes** - that *is* the fix |
 
 Unsure? Open an issue and ask before writing code.
 
 ## Two things that will get a change sent back
 
 **A second copy of the catalogue.** The metric names a viewer knows are
-checked against RFC 0005 and against a real broker, in both directions, by
+checked against metrics.md and against a real broker, in both directions, by
 the drift test in `web/tests`. A change that adds a name in one place and
 not the others, or that exempts a name from that check, is the drift the
 test exists to stop.
@@ -64,7 +68,7 @@ than not showing it.
 
 ## Conventions in the code
 
-- **Every rule a viewer enforces has a test, and the test names the RFC
+- **Every rule a viewer enforces has a test, and the test names the design
   section it asserts** in its comment. A rule with no test is a rule nothing
   is holding down, and prose cannot fail where a test can.
 - Tests assert the **failure**, not only the happy path, and a new test is
@@ -101,9 +105,9 @@ than not showing it.
 
 ## Issue or pull request?
 
-A defect you are not fixing yourself, or an ambiguity in RFC 0005, starts as
+A defect you are not fixing yourself, or an ambiguity in the design, starts as
 an issue - and one about the specification belongs in saguin rather than
-here. A fix that makes a viewer match what RFC 0005 already says can arrive
+here. A fix that makes a viewer match what the design already says can arrive
 directly as a pull request.
 
 ## Pull requests
@@ -112,7 +116,7 @@ Fork, work on a short-lived branch, and open the pull request against
 `main`. There is no `develop` branch and no branch naming convention. The
 maintainer's changes arrive the same way.
 
-One logical change each. Name the RFC 0005 sections it implements. In the
+One logical change each. Name the design sections it implements. In the
 commit message, say *why* - the diff already says what.
 
 Changes land by rebase or squash, never a merge commit, so the history stays

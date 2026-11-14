@@ -7,7 +7,7 @@
 //	saguin-viewer --address broker:9090 --user operator
 //
 // The other viewer in this repository is the browser one, in web/. This is a
-// client of the operations listener RFC 0005 specifies and nothing else.
+// client of the operations listener Sagüin's design specifies and nothing else.
 package main
 
 import (
@@ -124,7 +124,8 @@ which is the usual arrangement for the socket.
 		}
 		source = viewer.Unix(*socket, *timeout)
 		// A socket behind broker.operations.password_file asks for the credential
-		// too: RFC 0005 applies it to every transport the listener answers on.
+		// too: the broker checks a credential that is offered on every transport the
+		// listener answers on, and refuses a wrong one (design.md, Operations).
 		source.User, source.Password = *user, password
 	}
 

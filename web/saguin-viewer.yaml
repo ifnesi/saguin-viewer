@@ -92,18 +92,20 @@ history_file: "${SAGUIN_VIEWER_HISTORY_FILE:-}"
 # Every card is validated at startup, so a file that names a metric the page
 # cannot draw stops the viewer and names the card rather than drawing a blank.
 # Remove an entry to drop its tab; remove them all for just the built-in
-# dashboard. The seven shipped in dashboards/ are a partition of what the
-# broker exports: every metric it publishes a number for is on exactly one of
-# them, and none is on two - so a number has one place to be looked for. None
-# of them names a provider, a channel, a queue or a bridge, so all seven run
-# against any broker. See the README.
+# dashboard. The nine shipped in dashboards/ are a partition of what the
+# broker exports, one per section of Sagüin's metrics.md: every metric it
+# publishes a number for is on exactly one of them, and none is on two - so a
+# number has one place to be looked for. None of them names a channel, a
+# queue or a bridge, so all nine run against any broker. See the README.
 dashboard:
-  Traffic: "dashboards/traffic.yaml"
+  Process: "dashboards/process.yaml"
   Clients: "dashboards/clients.yaml"
-  Queues:  "dashboards/queues.yaml"
-  Storage: "dashboards/storage.yaml"
-  Bridges:  "dashboards/bridge.yaml"
-  QoS 2:   "dashboards/qos2.yaml"
+  Publishing: "dashboards/publishing.yaml"
+  Delivery: "dashboards/delivery.yaml"
+  Channels: "dashboards/channels.yaml"
+  Queues: "dashboards/queues.yaml"
+  Store: "dashboards/store.yaml"
+  Bridges: "dashboards/bridges.yaml"
   Runtime: "dashboards/runtime.yaml"
 
 broker:
@@ -152,7 +154,7 @@ broker:
     # Seconds. A seek moves this client's stored position, which only exists
     # if the session outlives the connection - so this cannot be zero. It is
     # deliberately short: a viewer parked behind the head is a consumer that
-    # is behind, and it drags saguin_channel_consumer_position_min down, the
+    # is behind, and it drags saguin_channel_position_min down, the
     # number saguin's one standing alert is built on.
     session_expiry: "${SAGUIN_MQTT_SESSION_EXPIRY:-3600}"
 

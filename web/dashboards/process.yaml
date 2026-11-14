@@ -1,0 +1,25 @@
+# Process: the series metrics.md lists under "Process", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Process"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Process
+      Whether the broker is up and ready, its goroutines, its logging, its reloads and its operations requests.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Uptime seconds", metric: saguin_uptime_seconds, format: duration }
+  - { type: stat, width: 3, title: "Ready", metric: saguin_ready }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Goroutines",
+      metric: saguin_goroutines, by: role }
+  - { type: breakdown, width: 6, height: medium, title: "Log lines dropped",
+      metric: saguin_log_lines_dropped_total, by: cause, severity: warning }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Reloads",
+      metric: saguin_reloads_total, by: part }
+  - { type: breakdown, width: 6, height: medium, title: "Operations requests",
+      metric: saguin_operations_requests_total, by: route }

@@ -1,0 +1,36 @@
+# Publishing: the series metrics.md lists under "Publishing", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Publishing"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Publishing
+      What clients published, what was refused or throttled, what each channel stored, and delivery admission.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Publish throttled seconds", metric: saguin_publish_throttled_seconds_total, format: duration }
+  - { type: stat, width: 3, title: "Delivery admission gated", metric: saguin_delivery_admission_gated }
+  - { type: stat, width: 3, title: "Delivery admission gated seconds", metric: saguin_delivery_admission_gated_seconds_total, format: duration }
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Publishes received, a second",
+      metric: saguin_publishes_received_total, mode: rate, format: msgs_rate }
+  - { type: breakdown, width: 6, height: medium, title: "Publish refused",
+      metric: saguin_publish_refused_total, by: cause, severity: warning }
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Records stored, a second",
+      metric: saguin_records_stored_total, mode: rate, format: msgs_rate }
+  - { type: timeseries, width: 6, height: medium, title: "Qos2 held",
+      metric: saguin_qos2_held, mode: level }
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Qos2 abandoned, a second",
+      metric: saguin_qos2_abandoned_total, mode: rate, format: msgs_rate }
+  - { type: timeseries, width: 6, height: medium, title: "Bytes received, a second",
+      metric: saguin_bytes_received_total, mode: rate, format: bytes_rate }
+  - { type: break }
+  - { type: timeseries, width: 6, height: medium, title: "Bytes sent, a second",
+      metric: saguin_bytes_sent_total, mode: rate, format: bytes_rate }
+  - { type: breakdown, width: 6, height: medium, title: "Requests",
+      metric: saguin_requests_total, by: request }

@@ -1,0 +1,30 @@
+# Bridges: the series metrics.md lists under "Bridges", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Bridges"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Bridges
+      Each bridge's link, its rules, what it received and sent, and what it could not send.
+
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge connected",
+      metric: saguin_bridge_connected, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge rule up",
+      metric: saguin_bridge_rule_up, by: bridge }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge connection attempts",
+      metric: saguin_bridge_connection_attempts_total, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge reconnects",
+      metric: saguin_bridge_reconnects_total, by: bridge }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge received",
+      metric: saguin_bridge_received_total, by: bridge }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge sent",
+      metric: saguin_bridge_sent_total, by: bridge }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Bridge unsent",
+      metric: saguin_bridge_unsent_total, by: bridge, severity: warning }

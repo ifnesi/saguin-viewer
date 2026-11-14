@@ -330,13 +330,14 @@ class TheMetricsParser(unittest.TestCase):
         """Nothing configured it, so nothing else could have listed it - and
         nothing else could have said where its topics are."""
         body = "\n".join([
-            'saguin_channel_info{channel="jobs",filter="iot/+/work/+",type="queue",provider="mem"} 1',
-            'saguin_channel_info{channel="jobs__dlq",filter="iot/+/work/+/__dlq",type="append",provider="mem"} 1',
-            'saguin_queue_depth{channel="jobs"} 4',
+            'saguin_channel_info{channel="jobs",filter="iot/+/work/+",type="queue"} 1',
+            'saguin_channel_info{channel="jobs__dlq",filter="__dlq/iot/+/work/+",type="append"} 1',
+            'saguin_queue_jobs{channel="jobs",state="ready"} 3',
+            'saguin_queue_jobs{channel="jobs",state="held"} 1',
             'saguin_channel_records{channel="jobs__dlq"} 2',
         ])
         found, held = app.catalogue(app.parse_metrics(body))
-        self.assertEqual(found["jobs__dlq"], ("append", "iot/+/work/+/__dlq"))
+        self.assertEqual(found["jobs__dlq"], ("append", "__dlq/iot/+/work/+"))
         self.assertEqual(held["jobs"], 4)     # unresolved work, not a record count
         self.assertEqual(held["jobs__dlq"], 2)
 
@@ -354,8 +355,8 @@ class WhatTheCatalogueSaysEachMetricMeans(unittest.TestCase):
         self.assertEqual(help, {"saguin_connections": "Clients connected now."})
 
     def test_a_description_carrying_punctuation_survives_whole(self):
-        """These sentences carry braces, quotes and dashes - RFC 0005
-        writes them that way - and a parser that split on any of them would
+        """These sentences carry braces, quotes and dashes - metrics.md's
+        Meanings hold them - and a parser that split on any of them would
         show half a sentence."""
         line = ('# HELP saguin_channel_info Always 1. Carries the filter as '
                 'written, `iot/+/{status,location}/+` included \u2014 and "type".')
@@ -418,7 +419,7 @@ class ThePayloadRenderer(unittest.TestCase):
 
 
 class WhenTheValueExpires(unittest.TestCase):
-    """RFC 0003: a delivery carries the seconds remaining as of that
+    """design.md, Delivery: a delivery carries the seconds remaining as of that
     delivery, so a page showing the number shows one that was true when the
     message arrived and is wrong by however long the window has been open.
     The absolute moment is the same fact and stays true."""
@@ -564,13 +565,9 @@ broker:
       tcp:
         address: 127.0.0.1:1
   storage:
-    default: mem
+    file_path: {db}
     default_retention_period: none
     default_retention_bytes: none
-    providers:
-      mem:
-        type: memory
-        snapshot_dir: none
 channels:
   wide:
     type: append
@@ -610,7 +607,7 @@ channels:
             return
         cls.dir = tempfile.mkdtemp()
         cls.path = pathlib.Path(cls.dir) / "route.yaml"
-        cls.path.write_text(cls.CONFIG)
+        cls.path.write_text(cls.CONFIG.format(db=pathlib.Path(cls.dir) / "route.db"))
 
     @classmethod
     def tearDownClass(cls):
@@ -618,26 +615,22 @@ channels:
             shutil.rmtree(cls.dir, ignore_errors=True)
 
     def broker_says(self):
-        """Every topic in one call, on standard input.
+        """Every topic, one call each, in the form meant to be read by a program.
 
-        **The list form, not the single-topic one.** Given one topic on the
-        command line `--route` explains it in prose for a person; given a
-        list on standard input it answers a line at a time in tab-separated
-        columns, which is the form meant to be read by something else.
+        The 0.2.0 broker's `--route <config> <topic> --json` answers one object
+        per line, `reaches` holding the channel the topic lands in (design.md,
+        Running, `--json`). A topic no channel claims lands on `$broadcast`,
+        which is what the viewer means by a topic with no channel.
         """
-        out = subprocess.run([str(self.binary), "--route", str(self.path)],
-                             input="\n".join(self.TOPICS) + "\n",
-                             capture_output=True, text=True, timeout=30)
-        self.assertEqual(out.returncode, 0, out.stderr)
         answers = {}
-        for line in out.stdout.splitlines():
-            if line.startswith("#") or not line.strip():
-                continue
-            cols = [c for c in line.split("\t") if c] if "\t" in line else line.split()
-            if len(cols) >= 2 and cols[0] in self.TOPICS:
-                answers[cols[0]] = None if cols[1] == "-" else cols[1]
-        missing = set(self.TOPICS) - set(answers)
-        self.assertFalse(missing, f"--route said nothing about {missing}: {out.stdout!r}")
+        for topic in self.TOPICS:
+            out = subprocess.run([str(self.binary), "--route", str(self.path), topic, "--json"],
+                                 capture_output=True, text=True, timeout=30)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            reaches = json.loads(out.stdout.splitlines()[0])["reaches"]
+            self.assertEqual(len(reaches), 1, f"--route said {reaches} of the topic {topic}")
+            channel = reaches[0]["channel"]
+            answers[topic] = None if channel == "$broadcast" else channel
         return answers
 
     def test_the_viewer_agrees_with_the_broker_on_every_topic(self):
@@ -836,19 +829,19 @@ class SearchingWhatAMessageHolds(unittest.TestCase):
 
 
 class AMetricWithASecondLabel(unittest.TestCase):
-    """`saguin_storage_commits_total` carries `closed_by` as well as
-    `provider`, so reading it one row per provider let the last row win. It
+    """`saguin_store_commits_total` carries `closed_by`, one row per way a
+    commit closed, so reading it one row per store let the last row win. It
     reported zero on a broker that had committed sixty thousand times, and
     the reading built on it - records per commit - was hidden rather than
     wrong, which is worse."""
 
     CATALOGUE = """
-saguin_provider_info{provider="durable",type="sqlite"} 1
-saguin_provider_bytes{provider="durable"} 4096
-saguin_storage_commits_total{provider="durable",closed_by="records"} 7
-saguin_storage_commits_total{provider="durable",closed_by="interval"} 62366
-saguin_storage_commits_total{provider="durable",closed_by="unbatched"} 0
-saguin_storage_committed_records_total{provider="durable"} 62838
+saguin_store_info{mode="full"} 1
+saguin_store_bytes 4096
+saguin_store_commits_total{closed_by="records"} 7
+saguin_store_commits_total{closed_by="interval"} 62366
+saguin_store_commits_total{closed_by="read"} 0
+saguin_store_committed_records_total 62838
 """
 
     def test_the_rows_are_added_up_rather_than_the_last_one_kept(self):
@@ -857,16 +850,17 @@ saguin_storage_committed_records_total{provider="durable"} 62838
             app.metrics_state.update({"taken": 1.0, "interval": 60,
                                       "error": None, "note": None})
         body = app.app.test_client().get("/api/metrics").get_json()
-        durable, = [p for p in body["providers"] if p["name"] == "durable"]
-        self.assertEqual(durable["commits"], 7 + 62366 + 0)
-        self.assertEqual(durable["records"], 62838)
+        store, = body["providers"]
+        self.assertEqual((store["name"], store["type"]), ("store", "full"))
+        self.assertEqual(store["commits"], 7 + 62366 + 0)
+        self.assertEqual(store["records"], 62838)
 
 
 class TheSubscriptionRefusalsAndTheGoRuntimeReachThePage(unittest.TestCase):
-    """The two things RFC 0005 added that the page must carry: a refusal split
+    """Two things the page must carry: a refusal split
     by the code's name, absent until the first, and the Go runtime's ten
-    series. The values are the RFC's own example scrape, so this reads a
-    figure it did not choose."""
+    series. The values are a fixed sample scrape, so this reads a figure it
+    did not choose."""
 
     CATALOGUE = """
 saguin_subscriptions_refused_total{reason="topic filter invalid"} 3
@@ -944,16 +938,16 @@ class WhatTheChannelsCardSays(unittest.TestCase):
     """
 
     CATALOGUE = """
-saguin_channel_info{channel="events",filter="iot/+/events/+",type="append",provider="durable"} 1
-saguin_channel_info{channel="jobs",filter="iot/+/work/+",type="queue",provider="durable"} 1
-saguin_channel_info{channel="state",filter="iot/+/state/+",type="latest",provider="volatile"} 1
-saguin_provider_info{provider="durable",type="sqlite"} 1
-saguin_provider_info{provider="volatile",type="memory"} 1
+saguin_channel_info{channel="events",filter="iot/+/events/+",type="append"} 1
+saguin_channel_info{channel="jobs",filter="iot/+/work/+",type="queue"} 1
+saguin_channel_info{channel="state",filter="iot/+/state/+",type="latest"} 1
 saguin_channel_records{channel="events"} 12
 saguin_channel_bytes{channel="events"} 1278
 saguin_channel_bytes{channel="jobs"} 945
-saguin_queue_depth{channel="jobs"} 7
-saguin_queue_inflight{channel="jobs"} 2
+saguin_queue_jobs{channel="jobs",state="ready"} 4
+saguin_queue_jobs{channel="jobs",state="backoff"} 1
+saguin_queue_jobs{channel="jobs",state="offered"} 2
+saguin_queue_jobs{channel="jobs",state="held"} 2
 """
 
     def rows(self):
@@ -974,15 +968,6 @@ saguin_queue_inflight{channel="jobs"} 2
         # disagree with.
         self.assertEqual(set(by_name), {"events", "jobs", "state"})
         return by_name
-
-    def test_each_channel_carries_its_provider_and_the_kind_of_store(self):
-        by_name = self.rows()
-        self.assertEqual((by_name["events"]["provider"],
-                          by_name["events"]["provider_type"]),
-                         ("durable", "sqlite"))
-        self.assertEqual((by_name["state"]["provider"],
-                          by_name["state"]["provider_type"]),
-                         ("volatile", "memory"))
 
     def test_a_queue_holds_its_unresolved_work_rather_than_nothing(self):
         by_name = self.rows()
@@ -1041,22 +1026,22 @@ class TheDashboardLoader(unittest.TestCase):
 
     def test_a_stat_may_subtract_single_values_and_nothing_else(self):
         """`minus:` is how the traffic tab draws what shared groups hold now,
-        held minus drained minus dropped (RFC 0005), which no one metric
+        for example message memory still free, which no one metric
         carries. It takes a list of metrics with a single value, on a stat,
         with no sparkline - each refusal here is one a card could otherwise
         make and then draw wrong."""
-        held = "saguin_shares_held_total"
+        held = "saguin_memory_max_bytes"
         self.load([{"type": "stat", "metric": held,
-                    "minus": ["saguin_shares_drained_total", "saguin_shares_dropped_total"]}])
+                    "minus": ["saguin_memory_in_transit_bytes"]}])
         for why, card in [
-            ("not a list", {"type": "stat", "metric": held, "minus": "saguin_shares_drained_total"}),
+            ("not a list", {"type": "stat", "metric": held, "minus": "saguin_memory_in_transit_bytes"}),
             ("an empty list", {"type": "stat", "metric": held, "minus": []}),
             ("a metric the page cannot draw", {"type": "stat", "metric": held, "minus": ["saguin_nothing"]}),
             ("a breakdown-only metric", {"type": "stat", "metric": held, "minus": ["saguin_connections_refused_total"]}),
-            ("with a sparkline", {"type": "stat", "metric": "saguin_session_queue_bytes", "sparkline": True,
-                                  "minus": ["saguin_shares_drained_total"]}),
-            ("on a timeseries", {"type": "timeseries", "metric": "saguin_session_queue_bytes",
-                                 "minus": ["saguin_shares_drained_total"]}),
+            ("with a sparkline", {"type": "stat", "metric": "saguin_inflight", "sparkline": True,
+                                  "minus": ["saguin_memory_in_transit_bytes"]}),
+            ("on a timeseries", {"type": "timeseries", "metric": "saguin_inflight",
+                                 "minus": ["saguin_memory_in_transit_bytes"]}),
         ]:
             with self.subTest(why):
                 self.refused([card])
@@ -1121,13 +1106,15 @@ class TheDashboardLoader(unittest.TestCase):
         # {channel=...} selector would be dropped and a fleet total drawn under
         # the operator's per-channel title - a wrong number reported as success.
         self.refused([{"type": "stat",
-                       "metric": 'saguin_published_total{channel="x"}'}])
+                       "metric": 'saguin_records_stored_total{channel="x"}'}])
 
-    def test_a_provider_metric_requires_its_selector(self):
-        self.refused([{"type": "stat", "metric": "saguin_provider_bytes"}])
-        self.load([{"type": "meter",
-                    "value": 'saguin_provider_bytes{provider="p"}',
-                    "max": 'saguin_provider_max_bytes{provider="p"}'}])
+    def test_a_selector_is_refused_where_no_label_is_honoured(self):
+        """The 0.2.0 broker has one store, so no series needs a selector to name
+        which; a meter draws two single values, and a selector on either is
+        read by nothing, so it is refused rather than accepted and ignored."""
+        self.load([{"type": "meter", "value": "saguin_memory_in_transit_bytes",
+                    "max": "saguin_memory_max_bytes"}])
+        self.refused([{"type": "stat", "metric": 'saguin_store_bytes{mode="full"}'}])
 
     def test_a_split_of_one_takes_no_selector_and_refuses_one(self):
         """**A breakdown is the other way round**, and it is what lets a
@@ -1135,10 +1122,10 @@ class TheDashboardLoader(unittest.TestCase):
         every one of them, so it names none - and a dashboard that named one
         would be a dashboard about this broker's providers, empty on anybody
         else's. A selector there asks for a chart of a single bar."""
-        self.load([{"type": "breakdown", "metric": "saguin_provider_bytes",
-                    "by": "provider"}])
-        self.refused([{"type": "breakdown", "by": "provider",
-                       "metric": 'saguin_provider_bytes{provider="p"}'}])
+        self.load([{"type": "breakdown", "metric": "saguin_store_commits_total",
+                    "by": "closed_by"}])
+        self.refused([{"type": "breakdown", "by": "closed_by",
+                       "metric": 'saguin_store_commits_total{closed_by="read"}'}])
 
     def test_the_readme_number_is_the_allow_list_size(self):
         """The README says how many metrics a card may name. A number written
@@ -1176,19 +1163,19 @@ class TheDashboardLoader(unittest.TestCase):
         # published_total carries a channel label the renderer has no split for;
         # queue_depth is summed rather than split, though the broker labels it.
         self.refused([{"type": "breakdown",
-                       "metric": "saguin_published_total", "by": "channel"}])
+                       "metric": "saguin_records_stored_total", "by": "channel"}])
         self.refused([{"type": "breakdown",
-                       "metric": "saguin_queue_depth", "by": "channel"}])
+                       "metric": "saguin_queue_jobs", "by": "channel"}])
 
     def test_a_breakdown_only_metric_is_refused_as_a_value(self):
         self.refused([{"type": "stat",
-                       "metric": "saguin_connections_by_protocol"}])
+                       "metric": "saguin_channel_next_offset"}])
         self.refused([{"type": "timeseries",
                        "metric": "saguin_connections_refused_total"}])
 
     def test_the_documented_cards_still_load(self):
-        for fam, by in (("saguin_connections_by_protocol", "protocol"),
-                        ("saguin_publish_refused_total", "reason"),
+        for fam, by in (("saguin_connections", "protocol"),
+                        ("saguin_publish_refused_total", "cause"),
                         ("saguin_connections_refused_total", "reason")):
             self.load([{"type": "breakdown", "metric": fam, "by": by}])
         self.load([{"type": "stat", "metric": "saguin_publish_refused_total"}])
@@ -1839,34 +1826,29 @@ print(json.dumps({"configured": app.CONFIG["feed_messages"],
 
 class PuttingDeadLetteredWorkBack(unittest.TestCase):
     """Requeue: where the `__dlq` level is, and the bytes that go back.
-
-    RFC 0003 gives a rule for where the level sits - at the `#` for a filter
-    ending in one, on the end otherwise - and reimplementing that rule is a way
-    to be subtly wrong on a filter shape nobody tested. It is not
-    reimplemented: the dead-letter channel's own filter carries the level at
-    the position to remove, and that filter is the broker's. Both shapes are
-    here because they are the two the broker produces, and they were taken from
-    a running broker's catalogue rather than from the prose:
-
-        jobs/#         ->  jobs/__dlq/#
-        iot/+/work/+   ->  iot/+/work/+/__dlq
+    The 0.2.0 broker moves a dead job to `<channel>__dlq` with the prefix
+    `__dlq/` on its topic (design.md, Channels, queue), and the dead-letter
+    channel's own filter, from the broker's catalogue, carries the level at the
+    position to remove - so the rule is read from the broker rather than
+    reimplemented:
+        jobs/#         ->  __dlq/jobs/#
+        iot/+/work/+   ->  __dlq/iot/+/work/+
     """
-
-    JOBS = "jobs/__dlq/#"
-    WORK = "iot/+/work/+/__dlq"
+    JOBS = "__dlq/jobs/#"
+    WORK = "__dlq/iot/+/work/+"
 
     def test_the_level_is_found_where_the_filter_puts_it(self):
-        self.assertEqual(app.dlq_level_index(self.JOBS), 1)
-        self.assertEqual(app.dlq_level_index(self.WORK), 4)
+        self.assertEqual(app.dlq_level_index(self.JOBS), 0)
+        self.assertEqual(app.dlq_level_index(self.WORK), 0)
         self.assertIsNone(app.dlq_level_index("jobs/#"))
         self.assertIsNone(app.dlq_level_index(""))
 
     def test_both_filter_shapes_strip_back_to_the_job(self):
-        self.assertEqual(app.requeue_topic("jobs/__dlq/j1", self.JOBS), ("jobs/j1", None))
-        self.assertEqual(app.requeue_topic("iot/site/work/j7/__dlq", self.WORK),
+        self.assertEqual(app.requeue_topic("__dlq/jobs/j1", self.JOBS), ("jobs/j1", None))
+        self.assertEqual(app.requeue_topic("__dlq/iot/site/work/j7", self.WORK),
                          ("iot/site/work/j7", None))
         # deeper topics under a `#` filter keep every level but the one
-        self.assertEqual(app.requeue_topic("jobs/__dlq/a/b/c", self.JOBS), ("jobs/a/b/c", None))
+        self.assertEqual(app.requeue_topic("__dlq/jobs/a/b/c", self.JOBS), ("jobs/a/b/c", None))
 
     def test_a_topic_without_the_level_where_the_filter_says_is_refused(self):
         """**Refused rather than guessed.** Publishing an un-stripped topic
@@ -1875,9 +1857,7 @@ class PuttingDeadLetteredWorkBack(unittest.TestCase):
         back, why = app.requeue_topic("jobs/j1", self.JOBS)
         self.assertIsNone(back)
         self.assertIn("__dlq", why)
-        back, why = app.requeue_topic("jobs/__dlq/j1", self.WORK)   # wrong channel's filter
-        self.assertIsNone(back)
-        back, why = app.requeue_topic("jobs/__dlq/j1", "jobs/#")     # not a dlq filter
+        back, why = app.requeue_topic("__dlq/jobs/j1", "jobs/#")     # not a dlq filter
         self.assertIsNone(back)
         self.assertIn("not a dead-letter channel", why)
 
@@ -2059,7 +2039,7 @@ class WhatTheBrokerGrantedIsKeptAndSaid(unittest.TestCase):
         self.assertEqual(body["subscribe"], app.MQTT_CFG["subscribe"])
 
     def test_the_state_offers_no_retained_store_detection(self):
-        """RFC 0002 "Retained messages on a broadcast topic": the broker's
+        """design.md, Channels: the broker's
         retained store always exists - `broker.retained` only changes which
         provider holds it and for how long - and a retained publish is
         refused `0x9A` only where a client's roles deny `retained`.
@@ -2292,6 +2272,23 @@ class TheRetainedSet(unittest.TestCase):
         self.deliver("probe/ret/c", b"live", False)
         self.assertNotIn("probe/ret/c", app.retained)
 
+    def test_a_latest_channels_starting_value_is_not_a_retained_value(self):
+        """The 0.2.0 broker sets RETAIN on the current values a subscription to a
+        `latest` channel starts with (design.md, SUBSCRIBE, Options). They
+        are that channel's state, not MQTT retained values, which live on
+        topics no channel claims."""
+        with app.lock:
+            saved = dict(app.channels)
+            app.channels.clear()
+            app.channels["state"] = ("latest", "probe/state/+")
+        try:
+            self.deliver("probe/state/d", b"on", True)
+            self.assertNotIn("probe/state/d", app.retained)
+        finally:
+            with app.lock:
+                app.channels.clear()
+                app.channels.update(saved)
+
 
 class TheAlarmRecord(unittest.TestCase):
     """Alarm episodes recorded by the poll thread: opened when a threshold
@@ -2339,48 +2336,48 @@ class TheAlarmRecord(unittest.TestCase):
         self.assertIsNone(app.alarm_value("saguin_publish_refused_total", []))
 
     def test_a_selector_alarm_opens_on_the_named_provider_and_not_the_other(self):
-        """A `{provider="…"}` alarm is recorded, and against the one it names.
+        """A `{bridge="…"}` alarm is recorded, and against the one it names.
 
         This ran end to end rather than against `alarm_value` alone because
         the grammar half already agreed and the bug was in the value half:
         the recorder matched a sample name against the *whole* reference,
         selector text included, so no sample could ever equal it - the value
         was always None, None never fires, and the episode the red card
-        implied was never opened. Two providers here, only the named one past
+        implied was never opened. Two bridges here, only the named one past
         the threshold, so a fix that merely summed the family would open on
         the wrong number and this would still be red.
         """
-        app.ALARM_SPECS = [{"dash": "D", "title": "Mem store",
-                            "metric": 'saguin_provider_bytes{provider="mem"}',
+        app.ALARM_SPECS = [{"dash": "D", "title": "Mem bridge",
+                            "metric": 'saguin_bridge_received_total{bridge="mem"}',
                             "expr": ">= 4000"}]
-        app.ALARM_KEYS = {("D", "Mem store")}
-        samples = [("saguin_provider_bytes", {"provider": "mem"}, 4096.0),
-                   ("saguin_provider_bytes", {"provider": "sqlite"}, 12.0)]
-        self.assertEqual(app.alarm_value('saguin_provider_bytes{provider="mem"}',
+        app.ALARM_KEYS = {("D", "Mem bridge")}
+        samples = [("saguin_bridge_received_total", {"bridge": "mem"}, 4096.0),
+                   ("saguin_bridge_received_total", {"bridge": "sqlite"}, 12.0)]
+        self.assertEqual(app.alarm_value('saguin_bridge_received_total{bridge="mem"}',
                                          samples), 4096.0)
-        self.assertEqual(app.alarm_value('saguin_provider_bytes{provider="sqlite"}',
+        self.assertEqual(app.alarm_value('saguin_bridge_received_total{bridge="sqlite"}',
                                          samples), 12.0)
         self.assertIsNotNone(app.evaluate_alarms(samples))
         self.assertEqual(len(app.alarm_episodes), 1)
         ep = app.alarm_episodes[0]
         self.assertIsNone(ep["ended"])
-        self.assertEqual(ep["peak"], 4096.0)      # the named provider's, not the sum
+        self.assertEqual(ep["peak"], 4096.0)      # the named bridge's, not the sum
         # And the one it does not name cannot open it: drop mem below the
         # threshold while sqlite stays where it was, and the episode closes.
-        cleared = [("saguin_provider_bytes", {"provider": "mem"}, 1.0),
-                   ("saguin_provider_bytes", {"provider": "sqlite"}, 12.0)]
+        cleared = [("saguin_bridge_received_total", {"bridge": "mem"}, 1.0),
+                   ("saguin_bridge_received_total", {"bridge": "sqlite"}, 12.0)]
         self.assertIsNotNone(app.evaluate_alarms(cleared))
         self.assertIsNotNone(app.alarm_episodes[0]["ended"])
 
-    def test_a_selector_naming_a_provider_that_is_absent_never_fires(self):
+    def test_a_selector_naming_a_bridge_that_is_absent_never_fires(self):
         """Absent stays None rather than becoming zero, selector and all - so
-        `< n` on a provider the broker is not running does not fire."""
+        `< n` on a bridge the broker is not running does not fire."""
         app.ALARM_SPECS = [{"dash": "D", "title": "Gone",
-                            "metric": 'saguin_provider_bytes{provider="nope"}',
+                            "metric": 'saguin_bridge_received_total{bridge="nope"}',
                             "expr": "< 1"}]
         app.ALARM_KEYS = {("D", "Gone")}
-        samples = [("saguin_provider_bytes", {"provider": "mem"}, 4096.0)]
-        self.assertIsNone(app.alarm_value('saguin_provider_bytes{provider="nope"}',
+        samples = [("saguin_bridge_received_total", {"bridge": "mem"}, 4096.0)]
+        self.assertIsNone(app.alarm_value('saguin_bridge_received_total{bridge="nope"}',
                                           samples))
         self.assertIsNone(app.evaluate_alarms(samples))
         self.assertEqual(app.alarm_episodes, [])
@@ -2762,7 +2759,7 @@ class WhoLostRecordsSaysWhatTheCounterCannot(unittest.TestCase):
     carried, `tracked` what the broker is holding, `beyond` what never fit in
     the record at all. A page that draws rows and says neither of the other
     two has an operator believe they have seen the whole fleet - which is the
-    failure `beyond` exists in RFC 0005 to stop.
+    failure the route's `beyond` exists to stop (design.md, Operations).
     """
 
     # The contract's own shape, which is what the broker answers. Kept whole
@@ -3093,10 +3090,9 @@ class TheMetricListDoesNotDriftFromTheBroker(unittest.TestCase):
     publishing is one the page silently cannot draw, and a metric the broker
     stopped publishing is a card that draws nothing with no error anywhere.
 
-    Four lists, and RFC 0005 is the oracle for all of them. Its catalogue is
-    closed - "a name here is a promise; a name not here is not published" - so
-    it is what the broker is held to, and what the viewer is held to, rather
-    than either being read to judge the other.
+    Four lists, and metrics.md is the oracle for all of them: it lists every
+    metric Sagüin exposes, so it is what the broker is held to, and what the
+    viewer is held to, rather than either being read to judge the other.
 
     The live broker is here because a specification the code does not follow
     would let both halves of a comparison against it agree and both be wrong.
@@ -3107,11 +3103,11 @@ class TheMetricListDoesNotDriftFromTheBroker(unittest.TestCase):
     missing. Everything happens, and then the first scrape of that process is
     taken.
 
-    **One metric is exempt and it is exempt for what it is.**
-    `saguin_storage_errors_total` has, in RFC 0005's own words, "no series
-    until a provider has failed", so a healthy broker publishes none - and
-    breaking a store to produce one would be a test about the harness. Every
-    other name in the catalogue is driven out of a real broker below.
+    **Four metrics are exempt, each for what it is.** The three snapshot
+    series exist in memory mode only and this broker runs in full mode, and
+    `saguin_channel_position_min` has a series only once a durable consumer
+    holds a position. Every other name in metrics.md is driven out of a real
+    broker below.
     """
 
     # The four `*_info` families are the documented exclusion: each is the
@@ -3120,9 +3116,13 @@ class TheMetricListDoesNotDriftFromTheBroker(unittest.TestCase):
     # than pattern-matching `_info` keeps the exclusion a list somebody chose,
     # which a new `*_info` metric has to be added to on purpose.
     INFO_FAMILIES = {"saguin_build_info", "saguin_channel_info",
-                     "saguin_provider_info", "saguin_bridge_info"}
+                     "saguin_store_info", "saguin_bridge_info"}
 
-    UNREACHABLE = {"saguin_storage_errors_total"}
+    # The snapshot series exist in memory mode only, and this broker's store
+    # is in full mode; saguin_channel_position_min has a series only once a
+    # durable consumer holds a position.
+    UNREACHABLE = {"saguin_snapshots_total", "saguin_snapshot_last_duration_seconds",
+                   "saguin_snapshot_last_success_timestamp_seconds", "saguin_channel_position_min"}
 
     CONFIG = """\
 broker:
@@ -3137,45 +3137,25 @@ broker:
     listen:
       tcp:
         address: 127.0.0.1:{ops}
-  limits:
-    # Small, so that the capped provider below can be filled by a handful of
-    # publishes rather than by two megabytes of them.
-    max_message_size: 4KiB
   storage:
-    default: mem
+    file_path: {db}
     default_retention_period: none
     default_retention_bytes: none
-    providers:
-      - mem:
-          type: memory
-          snapshot_dir: none
-        tiny:
-          type: memory
-          snapshot_dir: none
-          # A provider holds back one largest message plus headers for the
-          # operations that free it, so this is the smallest a 4KiB message
-          # size allows.
-          max_bytes: 64KiB
-        disk:
-          type: sqlite
-          file_path: {db}
 channels:
-  - events:
-      type: append
-      filter: iot/+/events/+
-      # On the sqlite provider, so that the storage counters have a provider
-      # that commits.
-      storage: disk
-    state:
-      type: latest
-      filter: iot/+/state/+
-    full:
-      type: append
-      filter: iot/+/full/+
-      storage: tiny
-    jobs:
-      type: queue
-      filter: iot/+/work/+
+  events:
+    type: append
+    filter: iot/+/events/+
+  state:
+    type: latest
+    filter: iot/+/state/+
+  full:
+    type: append
+    filter: iot/+/full/+
+    # Small, so that a handful of publishes fills it.
+    max_bytes: 64KiB
+  jobs:
+    type: queue
+    filter: iot/+/work/+
 bridges:
   head-office:
     # Nothing listens there. A bridge that cannot connect still publishes
@@ -3184,8 +3164,8 @@ bridges:
     peer: tcp://127.0.0.1:{peer}
     client_id: drift-bridge
     topics:
-      - filter: upstream/#
-        topic: iot/depot/events/$#
+      - filter: upstream/+
+        topic: iot/depot/events/$1
         direction: in
 """
 
@@ -3207,7 +3187,7 @@ bridges:
     @classmethod
     def setUpClass(cls):
         cls.binary = SAGUIN / "bin" / "saguin"
-        cls.rfc = SAGUIN / "docs" / "rfcs" / "0005-operations.md"
+        cls.rfc = SAGUIN / "docs" / "metrics.md"
         for path, how in ((cls.binary, "build it with `go build -o bin/saguin ./cmd/saguin`"),
                           (cls.rfc, "it is the oracle for every list here")):
             if not path.exists():
@@ -3340,7 +3320,7 @@ bridges:
         time.sleep(0.4)
         refused.loop_stop()
 
-        # A durable consumer that reads, for saguin_channel_consumer_position_min
+        # A durable consumer that reads, for saguin_channel_position_min
         # and saguin_channel_consumers. It stays connected, so
         # saguin_connections_by_protocol has a client to count.
         props = Properties(PacketTypes.CONNECT)
@@ -3398,42 +3378,29 @@ bridges:
 
     @classmethod
     def catalogue(cls):
-        """The metric names RFC 0005's catalogue promises.
+        """The metric names the 0.2.0 broker's metrics.md lists.
 
-        The catalogue is a run of Markdown tables between two headings, one
-        metric per row, each row opening with the name in backticks and its
-        labels in braces. Bounded by the headings rather than read from the
-        whole document, so the example scrape above it and the alert below it
-        cannot contribute a name the catalogue does not.
-
-        **The bound catches nothing today, and that was measured rather than
-        assumed.** Removing it leaves every case in this class passing, because
-        all seventy-eight metric rows in RFC 0005's tables are inside this section -
-        the example scrape's lines are samples rather than table rows, and the
-        alert's are in a code block. It stays as defence against that stopping
-        being true, which a table of metrics anywhere else in the document would
-        do. Whoever removes it should know it is belt-and-braces rather than
-        load-bearing.
+        Its tables are one row per series, or per series sharing a meaning,
+        each row's first cell the names in backticks with their labels in
+        braces ("`saguin_bytes_received_total`, `saguin_bytes_sent_total`").
+        Only rows opening with a name count, so the Rules section's prose
+        contributes none.
         """
-        text = cls.rfc.read_text()
-        start = text.index("\n### The catalogue\n")
-        # To the section after, not the next heading: "The Go runtime" is a
-        # bold title under "The one alert", and its ten rows are part of the
-        # catalogue. The alert's own lines are a code block, which no row
-        # pattern matches.
-        end = text.index("\n### Labels, and where the catalogue stops", start)
-        rows = re.findall(r"^\| `(saguin_[a-z0-9_]+)",
-                          text[start:end], re.M)
+        rows = []
+        for line in cls.rfc.read_text().splitlines():
+            if line.startswith("| `saguin_"):
+                rows += re.findall(r"`(saguin_[a-z0-9_]+)(?:\{[a-z_,]+\})?`",
+                                   line.split("|")[1])
         return rows
 
     def test_the_catalogue_was_read(self):
-        """Count what the parse examined. A heading renamed in the RFC or a
+        """Count what the parse examined. A table renamed in metrics.md or a
         table written differently would hand every comparison below an empty
         set, and an empty set agrees with everything."""
         rows = self.catalogue()
         self.assertGreaterEqual(
             len(rows), 60,
-            f"only {len(rows)} metrics parsed out of RFC 0005's catalogue - the "
+            f"only {len(rows)} metrics parsed out of metrics.md - the "
             f"section bounds or the row shape have moved, and every comparison "
             f"in this class is reading a short list")
         self.assertEqual(len(rows), len(set(rows)),
@@ -3471,7 +3438,7 @@ bridges:
         missing = set(self.catalogue()) - self.served - self.UNREACHABLE
         self.assertEqual(
             missing, set(),
-            f"RFC 0005's catalogue promises these and the scrape does not carry "
+            f"metrics.md lists these and the scrape does not carry "
             f"them: {sorted(missing)}. Either the broker no longer publishes "
             f"them, or `drive` above no longer reaches the state that makes "
             f"them exist.\nThe broker said:\n{self.broker_log()}")
@@ -3480,9 +3447,8 @@ bridges:
         extra = self.served - set(self.catalogue())
         self.assertEqual(
             extra, set(),
-            f"the broker publishes {sorted(extra)}, which RFC 0005's catalogue "
-            f"does not name - and the catalogue is closed, so either it has to "
-            f"gain a row or the broker has to stop")
+            f"the broker publishes {sorted(extra)}, which metrics.md does not "
+            f"list - so either it has to gain a row or the broker has to stop")
 
     def test_the_page_may_draw_every_metric_the_broker_serves(self):
         """The first of the two directions the drift runs in: a metric arrives
@@ -3504,8 +3470,8 @@ bridges:
         invented = self.allowed() - set(self.catalogue())
         self.assertEqual(
             invented, set(),
-            f"ALLOWED_METRICS names {sorted(invented)}, which RFC 0005's "
-            f"catalogue does not - a card on one draws an empty panel")
+            f"ALLOWED_METRICS names {sorted(invented)}, which metrics.md "
+            f"does not list - a card on one draws an empty panel")
 
     def test_the_info_families_are_the_whole_of_what_the_page_leaves_out(self):
         """The exclusion cannot grow quietly. app.py says the four `*_info`
@@ -4026,17 +3992,13 @@ broker:
     password_file: {passwd}
     acl_file: {acl}
   storage:
-    default: mem
+    file_path: {db}
     default_retention_period: none
     default_retention_bytes: none
-    providers:
-      - mem:
-          type: memory
-          snapshot_dir: none
 channels:
-  - events:
-      type: append
-      filter: iot/+/events/+
+  events:
+    type: append
+    filter: iot/+/events/+
 """
 
     # The role a viewer needs, with and without the one rule this is about. Written
@@ -4091,7 +4053,7 @@ users:
         acl.write_text(self.ACL.format(reply=self.REPLY_RULE if grant_reply else ""))
         port = self.free_port()
         cfg = self.dir / f"saguin-{grant_reply}.yaml"
-        cfg.write_text(self.CONFIG.format(mqtt=port, passwd=passwd, acl=acl))
+        cfg.write_text(self.CONFIG.format(mqtt=port, passwd=passwd, acl=acl, db=self.dir / f"saguin-{grant_reply}.db"))
 
         # **The configuration is checked before it is started.** An acl_file this
         # broker refuses would otherwise look like a refused subscription, which is
@@ -4197,3 +4159,93 @@ users:
                                  f"the channel filter was refused {rc}, so this "
                                  f"broker refuses more than the reply prefix and "
                                  f"neither arm measures what it claims")
+
+
+class ARefusalCarriesTheBrokersWords(unittest.TestCase):
+    """The 0.2.0 broker refuses a request with a PUBACK code and answers it in
+    words on the Response Topic (design.md, $saguin topics: "`below-floor` (User
+    Property `saguin-floor`: the floor) ... each also 0x83 on the PUBACK").
+    The viewer reports those words rather than the code's generic name, and
+    an answer that is not refused is the answer."""
+
+    class Info:
+        mid = 41
+
+    def setUp(self):
+        with app.lock:
+            app.seeks.clear()
+            app.pubacks.clear()
+
+    def test_a_refusal_reports_the_broker_s_words(self):
+        with app.lock:
+            app.pubacks[self.Info.mid] = 0x83
+            app.seeks["t1"] = "below-floor"
+        self.assertEqual(app.await_reply(self.Info, "t1", timeout=2), (None, 0x83, "below-floor"))
+
+    def test_an_answer_not_refused_is_the_answer(self):
+        with app.lock:
+            app.seeks["t2"] = "111"
+        self.assertEqual(app.await_reply(self.Info, "t2", timeout=2), ("111", None, None))
+
+
+class ASplitAddsUpOverItsOtherLabels(unittest.TestCase):
+    """A card split by one label shows one row per value of it.
+    saguin_missed_total carries channel and cause (metrics.md), and a list
+    built one row per series repeated every cause once per channel."""
+
+    CATALOGUE = """
+saguin_missed_total{channel="events",cause="retention"} 2
+saguin_missed_total{channel="events",cause="too_large"} 1
+saguin_missed_total{channel="fleet",cause="retention"} 3
+saguin_missed_total{channel="fleet",cause="too_large"} 0
+"""
+
+    def test_each_cause_appears_once_with_its_total(self):
+        with app.lock:
+            app.latest_samples[:] = app.parse_metrics(self.CATALOGUE)
+            app.metrics_state.update({"taken": 1.0, "interval": 60,
+                                      "error": None, "note": None})
+        body = app.app.test_client().get("/api/metrics").get_json()
+        self.assertEqual(body["session_drops"],
+                         [{"cause": "retention", "count": 5.0},
+                          {"cause": "too_large", "count": 1.0}])
+
+
+class ASeekBelowTheFloorSaysWhereTheChannelStarts(unittest.TestCase):
+    """design.md, $saguin topics: a seek to a time before the oldest
+    surviving record answers `below-floor` "(User Property `saguin-floor`:
+    the floor)". The page says so in those terms: the records from then are
+    gone, and the oldest still held is that offset."""
+
+    class Info:
+        mid = 77
+
+        def wait_for_publish(self, timeout=None):
+            return None
+
+    def test_the_refusal_names_the_floor(self):
+        test = self
+
+        class Client:
+            def publish(self, topic, payload, qos=0, properties=None):
+                ticket = properties.CorrelationData.decode()
+                with app.lock:
+                    app.pubacks[test.Info.mid] = 0x83
+                    app.seeks[ticket] = "below-floor"
+                    app.seek_props[ticket] = {"saguin-floor": "4211"}
+                return test.Info()
+
+        with app.lock:
+            app.channels.clear()
+            app.channels["fleet"] = ("append", "iot/fleet/+/+")
+            app.seeks.clear()
+            app.pubacks.clear()
+            app.seek_props.clear()
+        with unittest.mock.patch.object(app, "client", Client()), \
+                unittest.mock.patch.object(app, "PROTOCOL", app.mqtt.MQTTv5):
+            r = app.app.test_client().post("/api/seek", json={"channel": "fleet", "position": "-2d"})
+        body = r.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["floor"], "4211")
+        self.assertIn("the oldest still held is offset 4211", body["error"])
+        self.assertEqual(app.seek_props, {})

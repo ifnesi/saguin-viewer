@@ -1,8 +1,9 @@
 # The terminal viewer
 
-A saguin broker's numbers on a box with no browser and no Prometheus, read over
-SSH. One static Go binary, two dependencies, no agent to install on the broker:
-it reads the operations listener [RFC 0005][rfc] already serves.
+A Sagüin 0.2.0 broker's numbers on a box with no browser and no Prometheus, read
+over SSH. One static Go binary, two dependencies, no agent to install on the
+broker: it reads the `/metrics` its [operations listener][ops] already serves,
+each series described by its `HELP` line ([metrics.md][metrics]).
 
 The two are `gopkg.in/yaml.v3` and `golang.org/x/term`, both already saguin's at
 saguin's versions. Three modules end up linked in, the third being `x/sys`, which
@@ -12,7 +13,8 @@ three because that is what travels in the binary.
 The other viewer in this repository is [the browser one](../../web/). Neither
 needs the other.
 
-[rfc]: https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0005-operations.md
+[ops]: https://github.com/ifnesi/saguin/blob/main/docs/design.md#http
+[metrics]: https://github.com/ifnesi/saguin/blob/main/docs/metrics.md
 
 ## Building and running
 
@@ -35,8 +37,8 @@ something:
     read 12s ago, redrawing every 1m, broker recomputes every 1m
 
     Broker
-      uptime_seconds 1d 2h    connections 41    sessions_offline 6
-      subscriptions 118    retained_messages 4
+      uptime_seconds 1d 2h    connections 41    sessions_away 6
+      subscriptions 118    retained_values 4
 
     Channels
       channel      records      bytes  next_offset  consumers   behind  data lost
@@ -62,11 +64,13 @@ Every flag, and there are eight:
 | `--timeout DURATION` | how long to wait for the broker to answer, `10s` by default. It bounds each request rather than the whole run, so a broker that has gone away is one refusal rather than a hang. |
 | `--licenses` | print the notices embedded in the binary. |
 
-**A door naming no `password_file` needs no credential**, which is the usual
-arrangement for a socket: RFC 0005 leaves the socket's own file permissions to
-decide who may speak to it. Where the broker does name one, **the credential
-applies to the socket too** - it is a second gate rather than an alternative to
-the first - so `--user` goes with `--socket` as readily as with `--address`.
+**On the broker's own machine no credential is needed**: Sagüin 0.2.0 lets a
+request with none reach every route on a loopback address or its Unix socket,
+the socket's file permissions deciding who may speak to it. **A credential that is offered
+must be right**: a wrong password is refused with 401 rather than treated as
+none, and a good one whose scope in the operators' password file does not reach
+a route gets 403. So `--user` is for a remote `--address`, or a socket where you
+want the scope checked.
 
 **There is no `--password` flag.** An argument is in `/proc/<pid>/cmdline` and in
 everybody's `ps`, so a password there is readable by every process on the box.
@@ -80,9 +84,9 @@ got is correct and does not reach that route, and is widened with `saguin
 ## How often it redraws
 
 `refresh` in the dashboard file, **clamped up to what the broker says it
-recomputes at and never below it**. RFC 0005 gives the reason: a scrape arriving
-sooner than `min_scrape_interval` is answered from the previous computation, so a
-shorter refresh redraws the same numbers while the age on the screen resets -
+recomputes at and never below it**. The values the broker keeps in its store are
+re-read every `min_scrape_interval` (at least a minute), so a shorter refresh
+redraws the same numbers while the age on the screen resets -
 which reads as a broker whose numbers have stopped moving. The clamp is never
 silent; the screen says the interval it settled on and the one the file asked
 for.
@@ -109,7 +113,7 @@ refresh: 60s
 groups:
   - title: Clients
     layout: columns          # a row of labelled numbers
-    metrics: [saguin_connections, saguin_sessions_offline, saguin_subscriptions]
+    metrics: [saguin_connections, saguin_sessions_away, saguin_subscriptions]
 
   - title: Channels
     layout: rows             # a table
@@ -138,9 +142,9 @@ which is how a group becomes a widget of your own rather than one of a fixed set
     metrics:
       - saguin_channel_records
       - name: behind
-        value: saguin_channel_next_offset - saguin_channel_consumer_position_min
+        value: saguin_channel_next_offset - saguin_channel_position_min
       - name: data lost
-        value: saguin_channel_floor_offset > saguin_channel_consumer_position_min
+        value: saguin_channel_floor_offset > saguin_channel_position_min
       - name: per record
         value: saguin_channel_bytes / saguin_channel_records
         format: bytes
@@ -151,9 +155,9 @@ which is how a group becomes a widget of your own rather than one of a fixed set
     jobs             412    1.1 MiB          413        -          -     2.7 KiB
     telemetry     88,301   31.4 MiB       88,302      302          -       373 B
 
-**This is the reason the feature exists.** The two readings RFC 0005 says the
-whole catalogue is worth building for are a subtraction and a comparison, and it
-is explicit that no metric can carry either: a lag would need a threshold nobody
+**This is the reason the feature exists.** The two readings an operator most
+needs about a channel are a subtraction and a comparison, and no metric can
+carry either: a lag would need a threshold nobody
 can choose on an operator's behalf, or a series per consumer, which is the line
 the catalogue is closed against. So the broker publishes the operands and a
 dashboard does the arithmetic. `data lost` is a column rather than a subtraction
@@ -226,23 +230,23 @@ configure per metric:
 | `*_seconds` | a duration - `1d 2h` rather than `93,784` |
 | anything else | a count with thousands separators |
 
-**A blank cell is a dash and never a zero.** RFC 0005 does not measure a `latest`
-channel's bytes and a queue channel keeps no record count, so those cells have no
-sample - and a zero there would say the channel holds nothing.
+**A blank cell is a dash and never a zero.** A series the broker does not publish
+for a channel has no sample, and a zero there would say the channel holds
+nothing.
 
 ## Consumer lag
 
 The shipped dashboard's Channels table carries both readings as computed columns
 - `behind` and `data lost` above - because no metric is published for either:
 
-    floor_offset > consumer_position_min      a consumer's data has been deleted
-    next_offset − consumer_position_min       how far the furthest behind is
+    floor_offset > position_min      a consumer's data has been deleted
+    next_offset − position_min       how far the furthest behind is
 
-RFC 0005 calls the first the one alert the whole catalogue exists for. Retention
-has passed a stored position, so when that consumer returns it is refused rather
-than served the oldest surviving record - invariant 1 holding, and also somebody's
-missing afternoon of telemetry.
+The first is the alert that matters most: retention has passed a stored
+position, so the records between it and the floor are gone before that consumer
+reads them - somebody's missing afternoon of telemetry. The operations route
+`/v1/operations/position-lost` names the readers it happened to.
 
 Both are `-` until something has consumed durably, because
-`saguin_channel_consumer_position_min` has no series until then. On such a broker
+`saguin_channel_position_min` has no series until then. On such a broker
 the two columns drop out and the metric is named at the foot of the screen.

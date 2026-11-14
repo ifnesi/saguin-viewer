@@ -153,7 +153,7 @@ DEFAULTS = {
             # outliving the connection. It is deliberately short: a viewer
             # holding a position is a consumer like any other, and one left
             # parked behind the head drags
-            # saguin_channel_consumer_position_min down - the input to the
+            # saguin_channel_position_min down - the input to the
             # one alert saguin's whole catalogue exists for.
             "session_expiry": 3600,
             "keepalive": 30,
@@ -366,25 +366,23 @@ def http_server(cfg):
 # These describe what static/app.js implements in METRIC_MAP; the two are held
 # in step by TestAllowListMatchesRenderer.
 ALLOWED_METRICS = {
-    "saguin_connections":                    {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
+    "saguin_connections":                    {"scalar": True,  "history": True,  "breakdown": "protocol",       "selector": None},
     "saguin_subscriptions":                  {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     "saguin_uptime_seconds":                 {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_published_total":                {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
+    "saguin_records_stored_total":                {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     "saguin_publishes_received_total":       {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_deliveries_sent_total":          {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
+    "saguin_deliveries_total":          {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     "saguin_bytes_received_total":           {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     "saguin_bytes_sent_total":               {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     # Labelled by channel in the broker (metrics.go), but the page sums it - as
     # the built-in card does, "across every queue" - so it is a scalar, not a
     # breakdown. A `by: channel` on it has no renderer and is refused.
-    "saguin_queue_depth":                    {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_connections_total":              {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_broadcast_unmatched_total":      {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_deliveries_dropped_total":       {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_deliveries_refused_total":       {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
+    "saguin_queue_jobs":                    {"scalar": True,  "history": True,  "breakdown": "state",       "selector": None},
+    "saguin_connections_accepted_total":              {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
+    "saguin_missed_total":       {"scalar": True,  "history": True,  "breakdown": "cause",       "selector": None},
     "saguin_deliveries_expired_total":       {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_session_expiry_shortened_total": {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_sessions_offline":               {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
+    "saguin_session_expiry_capped_total": {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
+    "saguin_sessions_away":               {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
     # What the last start did to a fleet's sessions: how many came back, and
     # how many were ended and why. Both move at the start and then stand
     # still, so neither carries history - a line of a number that changes
@@ -397,31 +395,18 @@ ALLOWED_METRICS = {
     "saguin_wills_published_total":           {"scalar": True,  "history": False, "breakdown": "cause",    "selector": None},
     "saguin_wills_cancelled_total":           {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
     "saguin_wills_waiting":                   {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_sessions_dropped_total":         {"scalar": True,  "history": False, "breakdown": "cause",    "selector": None},
-    # What sessions hold unacknowledged, summed by the broker over every one:
-    # no label divides them, because the only one would be the client.
-    "saguin_session_queue_messages":         {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_session_queue_bytes":            {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    # A total (a stat sums the causes) and a breakdown by cause both exist.
-    "saguin_session_deliveries_dropped_total": {"scalar": True, "history": False, "breakdown": "cause",   "selector": None},
-    # **Shared groups, which are the other half of that question.** Held is
-    # what was put on a group's list, drained what was handed to a member,
-    # dropped what was let go otherwise, so held minus drained minus dropped is
-    # exactly what the groups hold (RFC 0005) - a stat with `minus:`. None
-    # carries history: all three are counters that only climb, and the reading
-    # RFC 0005 asks for - drained flat while held rises - is two numbers beside
-    # each other rather than two lines.
-    "saguin_shares_held_total":              {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_shares_drained_total":           {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
-    "saguin_shares_dropped_total":           {"scalar": True,  "history": False, "breakdown": "cause",    "selector": None},
-    "saguin_retained_messages":              {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
+    "saguin_sessions_ended_total":         {"scalar": True,  "history": False, "breakdown": "cause",    "selector": None},
+    # What shared groups let go, split by channel: a total for a stat, a
+    # breakdown for which channel's groups lose records.
+    "saguin_shares_dropped_total":           {"scalar": True,  "history": False, "breakdown": "channel",    "selector": None},
+    "saguin_retained_values":              {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
     # A total (a stat sums the refusals) and a breakdown by reason both exist.
-    "saguin_publish_refused_total":          {"scalar": True,  "history": False, "breakdown": "reason",   "selector": None},
+    "saguin_publish_refused_total":          {"scalar": True,  "history": False, "breakdown": "cause",   "selector": None},
     # Filters a SUBACK refused, by the code's name. Like the publish refusals
     # it has no series until the first refusal, and a total and a split both
     # exist.
     "saguin_subscriptions_refused_total":    {"scalar": True,  "history": False, "breakdown": "reason",   "selector": None},
-    # **The Go runtime's own figures** (RFC 0005, "The Go runtime"). The four
+    # **The Go runtime's own figures** (metrics.md, "Go runtime"). The four
     # counters keep a series because their rate is the reading: collections a
     # second first, since a small heap collecting dozens of times a second is
     # the regression this group exists to show. Stacks keep one as a level.
@@ -439,13 +424,10 @@ ALLOWED_METRICS = {
     "saguin_go_memory_limit_bytes":          {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
     # Breakdown only: the page has no single value for these, so a stat or a
     # line on one would draw nothing and is refused.
-    "saguin_connections_by_protocol":        {"scalar": False, "history": False, "breakdown": "protocol", "selector": None},
     "saguin_connections_refused_total":      {"scalar": False, "history": False, "breakdown": "reason",   "selector": None},
     # Provider metrics: a scalar, but only once a `{provider="..."}` selector
     # names which one; the meter reads them that way.
-    "saguin_provider_bytes":                 {"scalar": True,  "history": False, "breakdown": "provider",       "selector": "provider"},
-    "saguin_provider_max_bytes":             {"scalar": True,  "history": False, "breakdown": "provider",       "selector": "provider"},
-    "saguin_provider_publish_commit_max_records": {"scalar": True,  "history": False, "breakdown": "provider",       "selector": "provider"},
+    "saguin_store_bytes":                 {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
 
     # **The per-entity families, summed for a stat and split for a
     # breakdown.** The broker labels these by channel, queue, provider or
@@ -453,7 +435,6 @@ ALLOWED_METRICS = {
     # work is there", the split answers "which one". A dashboard asks for the
     # one it wants with `by:`, and asking for a split the page cannot draw is
     # refused rather than drawn empty.
-    "saguin_max_session_expiry_seconds":     {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
 
     # Exactly-once. **No breakdown on any of the three**, because the only
     # label that would divide them is the client, and the broker deliberately
@@ -466,51 +447,72 @@ ALLOWED_METRICS = {
     # a line of it is a flat line by construction.
     "saguin_qos2_held":                      {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
     "saguin_qos2_abandoned_total":           {"scalar": True,  "history": True,  "breakdown": None,       "selector": None},
-    "saguin_qos2_max_inflight_per_client":   {"scalar": True,  "history": False, "breakdown": None,       "selector": None},
 
-    "saguin_queue_inflight":                 {"scalar": True,  "history": True,  "breakdown": "queue",    "selector": None},
-    "saguin_queue_delivered_total":          {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
-    "saguin_queue_acknowledged_total":       {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
-    "saguin_queue_redelivered_total":        {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
-    "saguin_queue_returned_total":           {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
-    "saguin_queue_expired_total":            {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
-    "saguin_queue_dead_lettered_total":      {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
+    "saguin_queue_workers":                 {"scalar": True,  "history": False,  "breakdown": "channel",    "selector": None},
+    "saguin_queue_delivered_total":          {"scalar": True,  "history": False, "breakdown": "channel",    "selector": None},
+    "saguin_queue_acknowledged_total":       {"scalar": True,  "history": False, "breakdown": "channel",    "selector": None},
+    "saguin_queue_dead_lettered_total":      {"scalar": True,  "history": False, "breakdown": "channel",    "selector": None},
     # Not a fault: a producer set RETAIN on a topic a queue claims, and a queue
     # has no subscription a retained message could be delivered to. It is a
     # question about the operator's own filter, and this series is the only
     # place it is visible.
-    "saguin_queue_retain_ignored_total":     {"scalar": True,  "history": False, "breakdown": "queue",    "selector": None},
 
     "saguin_channel_records":                {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
     "saguin_channel_bytes":                  {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
     "saguin_channel_consumers":              {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
-    "saguin_channel_partitioned_consumers":  {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
-    "saguin_channel_position_lost_total":    {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
     "saguin_channel_retention_removed_total": {"scalar": True, "history": False, "breakdown": "channel",  "selector": None},
     # On a latest channel only, so a split names the latest channels and no
     # other: an append or queue channel carries no series rather than a zero.
-    "saguin_latest_superseded_total":        {"scalar": True,  "history": False, "breakdown": "channel",  "selector": None},
     # **Offsets do not sum**, so these are a split and nothing else: adding one
     # channel's next offset to another's makes a number that is about no
     # channel at all, and a stat drawing it would be confidently wrong.
     "saguin_channel_next_offset":            {"scalar": False, "history": False, "breakdown": "channel",  "selector": None},
     "saguin_channel_floor_offset":           {"scalar": False, "history": False, "breakdown": "channel",  "selector": None},
-    "saguin_channel_consumer_position_min":  {"scalar": False, "history": False, "breakdown": "channel",  "selector": None},
+    "saguin_channel_position_min":  {"scalar": False, "history": False, "breakdown": "channel",  "selector": None},
 
-    "saguin_storage_commits_total":          {"scalar": True,  "history": False, "breakdown": "provider", "selector": None},
-    "saguin_storage_committed_records_total": {"scalar": True, "history": False, "breakdown": "provider", "selector": None},
-    "saguin_storage_errors_total":           {"scalar": True,  "history": False, "breakdown": "provider", "selector": None},
+    "saguin_store_commits_total":          {"scalar": True,  "history": False, "breakdown": "closed_by", "selector": None},
+    "saguin_store_committed_records_total": {"scalar": True, "history": False, "breakdown": None, "selector": None},
 
     "saguin_bridge_received_total":          {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
     "saguin_bridge_sent_total":              {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
-    "saguin_bridge_loops_skipped_total":     {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
     "saguin_bridge_reconnects_total":        {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
     # Labelled by bridge and cause in the broker; the page adds the causes up
     # per bridge, as it does closed_by on saguin_storage_commits_total.
     "saguin_bridge_unsent_total":            {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
-    "saguin_bridge_unstored_total":          {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
     "saguin_bridge_connected":               {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
-    "saguin_bridge_stopped":                 {"scalar": True,  "history": False, "breakdown": "bridge",   "selector": None},
+
+    # **The 0.2.0 broker's other series**, read through the scrape's generic totals
+    # (families in /api/metrics): a stat sums a family, a breakdown splits it
+    # by its one label.
+    "saguin_ready": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_goroutines": {"scalar": True, "history": False, "breakdown": "role", "selector": None},
+    "saguin_log_lines_dropped_total": {"scalar": True, "history": False, "breakdown": "cause", "selector": None},
+    "saguin_reloads_total": {"scalar": True, "history": False, "breakdown": "part", "selector": None},
+    "saguin_operations_requests_total": {"scalar": True, "history": False, "breakdown": "route", "selector": None},
+    "saguin_connections_open": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_disconnects_total": {"scalar": True, "history": False, "breakdown": "reason", "selector": None},
+    "saguin_subscriptions_held": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_wills_dropped_total": {"scalar": True, "history": False, "breakdown": "cause", "selector": None},
+    "saguin_publish_throttled_seconds_total": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_delivery_admission_gated": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_delivery_admission_gated_seconds_total": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_requests_total": {"scalar": True, "history": False, "breakdown": "request", "selector": None},
+    "saguin_inflight": {"scalar": True, "history": True, "breakdown": None, "selector": None},
+    "saguin_retained_bytes": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_queue_attempts_failed_total": {"scalar": True, "history": False, "breakdown": "channel", "selector": None},
+    "saguin_queue_stale_responses_total": {"scalar": True, "history": False, "breakdown": "channel", "selector": None},
+    "saguin_store_wal_bytes": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_store_full": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_store_no_credit_seconds_total": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_snapshots_total": {"scalar": True, "history": False, "breakdown": "result", "selector": None},
+    "saguin_snapshot_last_success_timestamp_seconds": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_snapshot_last_duration_seconds": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_memory_in_transit_bytes": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_memory_max_bytes": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_memory_full_seconds_total": {"scalar": True, "history": False, "breakdown": None, "selector": None},
+    "saguin_bridge_rule_up": {"scalar": True, "history": False, "breakdown": "bridge", "selector": None},
+    "saguin_bridge_connection_attempts_total": {"scalar": True, "history": False, "breakdown": "bridge", "selector": None},
+
 }
 
 # **The four `*_info` families are not here and cannot be.** They carry no
@@ -648,10 +650,10 @@ def validate_card(card, i, columns, where0):
             what = "a sparkline" if t == "stat" else f"a {card.get('mode', 'level')} line"
             raise SystemExit(f"saguin-viewer: {where}: {what} needs a metric kept "
                              f"over time, and {fam!r} is not")
-        # `minus:` draws the metric less others, each a single value: the one
-        # figure no family carries, what shared groups are holding now, is
-        # held minus drained minus dropped (RFC 0005). No sparkline, since the
-        # history is the metric's alone.
+        # `minus:` draws the metric less others, each a single value, for a
+        # figure no family carries - message memory still free is
+        # saguin_memory_max_bytes minus saguin_memory_in_transit_bytes. No
+        # sparkline, since the history is the metric's alone.
         if "minus" in card:
             minus = card["minus"]
             if t != "stat" or not isinstance(minus, list) or not minus:
@@ -828,6 +830,7 @@ topics = {}          # topic -> {"count", "last", "channel", "kind", "messages"}
 channels = {}        # name -> kind, from the broker's own catalogue
 holds = {}           # name -> records the broker says it holds
 seeks = {}           # correlation id -> reply, for seeks and point reads
+seek_props = {}      # correlation id -> the reply's user properties (saguin-floor)
 pubacks = {}         # message id -> the reason code the broker answered with
 # The retained value the broker keeps per broadcast topic, as this viewer has
 # seen it: the retain flag is set on the messages delivered when it subscribes,
@@ -837,7 +840,7 @@ pubacks = {}         # message id -> the reason code the broker answered with
 retained = {}        # topic -> {"topic", "at", "payload", "qos"}
 
 # **A schema registry needs nothing from the broker**, which is the whole
-# point of RFC 0003's convention: a `latest` channel is already a key-value
+# point of the design's convention (design.md, Channels): a `latest` channel is already a key-value
 # store with delete, so a registry is a channel and an agreement. A producer
 # publishes the schema text to a topic in it and names that *topic* in a
 # `schema` user property; a consumer reads the property, point-reads the
@@ -889,7 +892,7 @@ schema_types = {}
 # marking it.
 #
 # **Keyed by `saguin-id`**, which is the work's identity across the whole
-# round trip (RFC 0003): a job put back, failed again and dead-lettered a
+# round trip (design.md, PUBLISH): a job put back, failed again and dead-lettered a
 # second time carries the same id, so that second record says "already put
 # back once" rather than looking untouched.
 #
@@ -1486,7 +1489,7 @@ def parse_help(body):
     """What the catalogue says each metric means, by name.
 
     **The broker already writes this and nothing was reading it.** Every
-    series in RFC 0005 carries a `# HELP` line saying what it counts and,
+    series carries a `# HELP` line, its Meaning in metrics.md, saying what it counts and,
     more usefully, what it deliberately does not - a dashboard that repeats
     that in its own words is a second copy to keep in step, and the copy
     that goes stale is the one nobody scrapes. Read it off the wire instead,
@@ -1609,6 +1612,41 @@ def one(samples, name, labels=None):
     return None
 
 
+def families(samples):
+    """Every family's total, and its totals by each label it carries.
+
+    **For the series the page keeps no table of its own for**: a card on any
+    of them reads its sum here, or its split by one label, so a series 0.2.0
+    adds needs a line in the allow list and the renderer, not a reader.
+    """
+    out = {}
+    for n, lb, v in samples:
+        f = out.setdefault(n, {"total": 0.0, "by": {}})
+        f["total"] += v
+        for k, x in lb.items():
+            by = f["by"].setdefault(k, {})
+            by[x] = by.get(x, 0.0) + v
+    return out
+
+
+def split(samples, name, label, field, by_name=False):
+    """One family added up by one of its labels: a row per value of that
+    label, `field` naming it and `count` its total, largest first or, with
+    by_name, in the label's order.
+
+    **Added up, because a family may carry a second label.** One row per
+    series labelled by one of its labels repeats each value once per value
+    of the other - saguin_missed_total, by channel and cause, drew every
+    cause once per channel on a card meant to split by cause.
+    """
+    total = {}
+    for lb, v in rows(samples, name):
+        k = lb.get(label, "?")
+        total[k] = total.get(k, 0.0) + v
+    out = [{field: k, "count": v} for k, v in total.items()]
+    return sorted(out, key=(lambda r: r[field]) if by_name else (lambda r: -r["count"]))
+
+
 def rows(samples, name):
     """Every sample of one name, as (labels, value)."""
     return [(lb, v) for n, lb, v in samples if n == name]
@@ -1618,7 +1656,7 @@ def catalogue(samples=None):
     """Which channels this broker has, of what type, and holding what - from
     the broker itself.
 
-    `saguin_channel_info{channel,filter,type,provider}` is RFC 0005's own
+    `saguin_channel_info{channel,type,filter}` is the broker's own
     answer to "what channels are there", so the viewer needs no list that
     goes stale the moment somebody edits saguin.yaml. A dead-letter channel
     a queue derives shows up here too, which is the point: nothing
@@ -1648,13 +1686,13 @@ def catalogue(samples=None):
     for lb, v in rows(samples, "saguin_channel_records"):
         if lb.get("channel"):
             held[lb["channel"]] = int(v)
-    # **A queue has no record count and that is deliberate.** RFC 0005:
-    # resolution removes from the middle rather than the front, so
-    # `next - floor` says nothing there and the store keeps the depth
-    # itself. Unresolved work is the number that means something.
-    for lb, v in rows(samples, "saguin_queue_depth"):
+    # **A queue's holdings are its unfinished jobs**, saguin_queue_jobs by
+    # state (metrics.md): a job leaves from the middle rather than the front,
+    # so `next - floor` says nothing there. Unfinished work is the number
+    # that means something.
+    for lb, v in rows(samples, "saguin_queue_jobs"):
         if lb.get("channel"):
-            held[lb["channel"]] = int(v)
+            held[lb["channel"]] = held.get(lb["channel"], 0) + int(v)
     return found, held
 
 
@@ -1790,8 +1828,7 @@ def exactness(filt, i):
 
     A spelled-out level beats `+`, `+` beats `#`, and a filter that has
     ended beats one still carrying `#` - because ending pins the topic's
-    length. RFC 0002 "Which channel a topic belongs to" is where this is
-    specified.
+    length. design.md, Words, Channel, is where this is specified.
     """
     levels = filt.split("/")
     if i >= len(levels):
@@ -1820,7 +1857,7 @@ def channel_of(topic, chans=None):
     settle an argument with; this is a display grouping in a demo page. It
     is here rather than derived from the delivery because a channel's
     records are written by saguin itself and carry no Subscription
-    Identifier to attribute them by (RFC 0001).
+    Identifier to attribute them by.
     """
     if chans is None:
         with lock:
@@ -1948,15 +1985,16 @@ def snapshot(samples):
     tot = lambda name: sum(v for n, _lb, v in samples if n == name)
     return {
         "t": time.time(),
-        "connections": one(samples, "saguin_connections"),
+        "connections": tot("saguin_connections"),
         "subscriptions": one(samples, "saguin_subscriptions"),
-        "published": tot("saguin_published_total"),
+        "published": tot("saguin_records_stored_total"),
         "refused": tot("saguin_publish_refused_total"),
-        "queue_depth": tot("saguin_queue_depth"),
-        "queue_inflight": tot("saguin_queue_inflight"),
-        "provider_bytes": tot("saguin_provider_bytes"),
-        "unmatched": one(samples, "saguin_broadcast_unmatched_total"),
-        "dropped": one(samples, "saguin_deliveries_dropped_total"),
+        "queue_depth": sum(v for n, lb, v in samples
+                           if n == "saguin_queue_jobs" and lb.get("state") != "held"),
+        "queue_inflight": sum(v for n, lb, v in samples
+                              if n == "saguin_queue_jobs" and lb.get("state") == "held"),
+        "provider_bytes": tot("saguin_store_bytes"),
+        "dropped": sum(v for n, _lb, v in samples if n == "saguin_missed_total"),
         # **Cumulative, and the page turns them into rates.** They are the
         # only numbers here a throughput can be drawn from: everything else
         # counts records the broker decided to keep. A counter is stored
@@ -1966,15 +2004,13 @@ def snapshot(samples):
         "bytes_in": one(samples, "saguin_bytes_received_total"),
         "bytes_out": one(samples, "saguin_bytes_sent_total"),
         "publishes_in": one(samples, "saguin_publishes_received_total"),
-        "deliveries_out": one(samples, "saguin_deliveries_sent_total"),
-        "deliveries_refused": one(samples, "saguin_deliveries_refused_total"),
-        "sessions_offline": one(samples, "saguin_sessions_offline"),
+        "deliveries_out": sum(v for n, _lb, v in samples if n == "saguin_deliveries_total"),
+        "sessions_offline": one(samples, "saguin_sessions_away"),
         "sessions_restored": one(samples, "saguin_sessions_restored_total"),
         "wills_waiting": one(samples, "saguin_wills_waiting"),
         "wills_cancelled": one(samples, "saguin_wills_cancelled_total"),
-        "session_queue_messages": one(samples, "saguin_session_queue_messages"),
-        "session_queue_bytes": one(samples, "saguin_session_queue_bytes"),
-        "retained": one(samples, "saguin_retained_messages"),
+        "retained": one(samples, "saguin_retained_values"),
+        "inflight": one(samples, "saguin_inflight"),
         # The Go runtime: four cumulative counters the page turns into rates,
         # and the stacks as a level.
         "go_gc_cycles": one(samples, "saguin_go_gc_cycles_total"),
@@ -1989,7 +2025,6 @@ def snapshot(samples):
         # zero here would draw a card saying the feature was on and idle.
         "qos2_held": one(samples, "saguin_qos2_held"),
         "qos2_abandoned": one(samples, "saguin_qos2_abandoned_total"),
-        "qos2_max_inflight": one(samples, "saguin_qos2_max_inflight_per_client"),
     }
 
 
@@ -2102,7 +2137,13 @@ def on_message(_client, _userdata, msg):
     if msg.topic == REPLY_TOPIC:
         ticket = getattr(getattr(msg, "properties", None), "CorrelationData", b"") or b""
         with lock:
-            seeks[ticket.decode(errors="replace")] = msg.payload.decode(errors="replace")
+            key = ticket.decode(errors="replace")
+            seeks[key] = msg.payload.decode(errors="replace")
+            up = user_properties(msg)
+            # Only a refusal's answer carries these, so only those are kept,
+            # and the seek that reads one takes it.
+            if "saguin-floor" in up or "saguin-next" in up:
+                seek_props[key] = up
         return
 
     up = user_properties(msg)
@@ -2151,7 +2192,7 @@ def on_message(_client, _userdata, msg):
         getattr(getattr(msg, "properties", None), "ContentType", "") or "", kind)
     # **A deletion removes the topic rather than adding an empty row to it.**
     #
-    # On a `latest` channel a zero-length payload *is* the delete - RFC 0002 -
+    # On a `latest` channel a zero-length payload *is* the delete (design.md, Channels) -
     # so a value that has been deleted must stop appearing, or the tree shows
     # a key the broker no longer holds. On a broadcast topic the same publish
     # carrying RETAIN deletes the retained value, which is how MQTT deletes
@@ -2225,10 +2266,13 @@ def on_message(_client, _userdata, msg):
                      # it is labelled. A record whose broker timestamp
                      # precedes this connection is one that already existed.
                      "replayed": _is_replay(entry)})
-        # The retain flag marks the value the broker keeps for this topic. A
-        # zero-length retained publish is how MQTT clears one, so an empty one
-        # removes rather than records.
-        if msg.retain:
+        # The retain flag marks the value the broker keeps for a broadcast
+        # topic. A zero-length retained publish is how MQTT clears one, so an
+        # empty one removes rather than records. On a `latest` channel 0.2.0
+        # sets the flag on the current values a subscription starts with
+        # (design.md, SUBSCRIBE, Options), which are the channel's state, not
+        # retained values, so only a topic no channel claims is recorded.
+        if msg.retain and not ch:
             if msg.payload:
                 retained[msg.topic] = {"topic": msg.topic, "at": entry["at"],
                                        "payload": entry["payload"], "qos": entry["qos"]}
@@ -2305,7 +2349,7 @@ def run():
         # client a stored position and therefore something a seek can move.
         # Short rather than long: a viewer holding a position is a consumer
         # like any other, and one parked behind the head drags
-        # saguin_channel_consumer_position_min down - the input to the one
+        # saguin_channel_position_min down - the input to the one
         # alert saguin's whole catalogue exists for.
         props.SessionExpiryInterval = int(MQTT_CFG["session_expiry"])
     while True:
@@ -2478,29 +2522,23 @@ def api_metrics():
     byts = records
     records = lbl("saguin_channel_records")
     nxt, floor = lbl("saguin_channel_next_offset"), lbl("saguin_channel_floor_offset")
-    pos, cons = lbl("saguin_channel_consumer_position_min"), lbl("saguin_channel_consumers")
-    sliced = lbl("saguin_channel_partitioned_consumers")
-    depth = lbl("saguin_queue_depth")
-
-    # Which provider holds each channel, and which kind of store that
-    # provider is. Both are already on the wire and neither was being read:
-    # the channel's own series carries its provider's name, and the
-    # provider's series carries its type. So this is a join across two
-    # series the page already scrapes rather than anything new to ask the
-    # broker for - and without it a row cannot say whether what it counts
-    # survives a restart, which is the difference between the two kinds.
-    holder = {lb["channel"]: lb.get("provider", "")
-              for lb, _ in rows(samples, "saguin_channel_info") if lb.get("channel")}
-    kind_of = {lb["provider"]: lb.get("type", "")
-               for lb, _ in rows(samples, "saguin_provider_info") if lb.get("provider")}
+    pos, cons = lbl("saguin_channel_position_min"), lbl("saguin_channel_consumers")
+    # **Queue depth from the jobs by state**: in 0.2.0 one gauge counts a
+    # queue's unfinished jobs by state, and a job with a worker is the
+    # in-flight figure rc1 kept apart.
+    def jobs(held):
+        out = {}
+        for lb, v in rows(samples, "saguin_queue_jobs"):
+            if (lb.get("state") == "held") == held:
+                out[lb.get("channel")] = out.get(lb.get("channel"), 0.0) + v
+        return out
+    depth, leased = jobs(False), jobs(True)
 
     channel_rows = []
     for name, (kind, filt) in sorted(chans.items()):
         p, f, n = pos.get(name), floor.get(name), nxt.get(name)
         channel_rows.append({
             "name": name, "type": kind, "filter": filt,
-            "provider": holder.get(name) or None,
-            "provider_type": kind_of.get(holder.get(name, "")) or None,
             # **A queue's number is its unresolved work, under another
             # name.** `saguin_channel_records` is next minus floor, and a
             # queue has neither: resolution removes from the middle rather
@@ -2521,7 +2559,6 @@ def api_metrics():
             # a panel implying it would read as an alert during every rolling
             # restart. Which client declared what is on the operations
             # sessions route, where a client-chosen number belongs.
-            "partitioned": sliced.get(name),
             "position_min": p,
             # **The one alert the whole catalogue exists for.** Retention has
             # passed a stored position, so when that consumer returns it is
@@ -2531,10 +2568,8 @@ def api_metrics():
             # Its warning shot: a consumer far enough behind to be worth
             # looking at before retention reaches it.
             "lag": (None if p is None or n is None else max(n - p, 0)),
-            "published": lbl("saguin_published_total").get(name),
+            "published": lbl("saguin_records_stored_total").get(name),
             "retention_removed": lbl("saguin_channel_retention_removed_total").get(name),
-            "position_lost": lbl("saguin_channel_position_lost_total").get(name),
-            "superseded": lbl("saguin_latest_superseded_total").get(name),
         })
 
     queue_rows = []
@@ -2544,42 +2579,35 @@ def api_metrics():
         g = lambda m: lbl(m).get(name, 0)
         queue_rows.append({
             "name": name,
-            "depth": g("saguin_queue_depth"), "inflight": g("saguin_queue_inflight"),
+            "depth": depth.get(name, 0), "inflight": leased.get(name, 0),
+            "workers": g("saguin_queue_workers"),
             "delivered": g("saguin_queue_delivered_total"),
             "acknowledged": g("saguin_queue_acknowledged_total"),
-            "returned": g("saguin_queue_returned_total"),
-            "redelivered": g("saguin_queue_redelivered_total"),
             "dead_lettered": g("saguin_queue_dead_lettered_total"),
-            "expired": g("saguin_queue_expired_total"),
-            "retain_ignored": g("saguin_queue_retain_ignored_total"),
+            "expired": sum(v for lb, v in rows(samples, "saguin_queue_dead_lettered_total")
+                           if lb.get("channel") == name and lb.get("reason") == "expired"),
         })
 
-    providers = []
-    for lb, _ in rows(samples, "saguin_provider_info"):
-        p = lb.get("provider")
-        providers.append({
-            "name": p, "type": lb.get("type"),
-            "bytes": lbl("saguin_provider_bytes", "provider").get(p),
-            "max_bytes": lbl("saguin_provider_max_bytes", "provider").get(p),
-            "commits": lbl("saguin_storage_commits_total", "provider").get(p),
-            "records": lbl("saguin_storage_committed_records_total", "provider").get(p),
-            "commit_max": lbl("saguin_provider_publish_commit_max_records", "provider").get(p),
-            "errors": lbl("saguin_storage_errors_total", "provider").get(p),
-        })
-
+    # **One store in 0.2.0**, its mode on saguin_store_info, so the table that
+    # listed rc1's providers has one row.
+    providers = [{
+        "name": "store", "type": lb.get("mode"),
+        "bytes": one(samples, "saguin_store_bytes"),
+        "wal_bytes": one(samples, "saguin_store_wal_bytes"),
+        "full": one(samples, "saguin_store_full"),
+        "commits": sum(v for _lb, v in rows(samples, "saguin_store_commits_total")),
+        "records": one(samples, "saguin_store_committed_records_total"),
+    } for lb, _ in rows(samples, "saguin_store_info")]
     bridges = []
     for lb, _ in rows(samples, "saguin_bridge_info"):
         b = lb.get("bridge")
         bridges.append({
             "name": b, "peer": lb.get("peer"),
             "connected": lbl("saguin_bridge_connected", "bridge").get(b),
-            "stopped": lbl("saguin_bridge_stopped", "bridge").get(b),
             "received": lbl("saguin_bridge_received_total", "bridge").get(b),
             "sent": lbl("saguin_bridge_sent_total", "bridge").get(b),
-            "skipped": lbl("saguin_bridge_loops_skipped_total", "bridge").get(b),
             "reconnects": lbl("saguin_bridge_reconnects_total", "bridge").get(b),
             "unsent": lbl("saguin_bridge_unsent_total", "bridge").get(b),
-            "unstored": lbl("saguin_bridge_unstored_total", "bridge").get(b),
         })
 
     build = next((lb for lb, _ in rows(samples, "saguin_build_info")), {})
@@ -2590,31 +2618,23 @@ def api_metrics():
         "broker": {
             "version": build.get("version"), "id": build.get("broker_id"),
             "uptime": one(samples, "saguin_uptime_seconds"),
-            "connections": one(samples, "saguin_connections"),
-            "connections_total": one(samples, "saguin_connections_total"),
+            "connections": sum(v for _lb, v in rows(samples, "saguin_connections")),
+            "connections_total": one(samples, "saguin_connections_accepted_total"),
             "subscriptions": one(samples, "saguin_subscriptions"),
-            "max_session_expiry": one(samples, "saguin_max_session_expiry_seconds"),
-            "session_expiry_shortened": one(samples, "saguin_session_expiry_shortened_total"),
-            "unmatched": one(samples, "saguin_broadcast_unmatched_total"),
-            "dropped": one(samples, "saguin_deliveries_dropped_total"),
+            "session_expiry_shortened": one(samples, "saguin_session_expiry_capped_total"),
+            "dropped": sum(v for n, _lb, v in samples if n == "saguin_missed_total"),
             "expired": one(samples, "saguin_deliveries_expired_total"),
             "bytes_in": one(samples, "saguin_bytes_received_total"),
             "bytes_out": one(samples, "saguin_bytes_sent_total"),
             "publishes_in": one(samples, "saguin_publishes_received_total"),
-            "deliveries_out": one(samples, "saguin_deliveries_sent_total"),
-            "deliveries_refused": one(samples, "saguin_deliveries_refused_total"),
-                "sessions_offline": one(samples, "saguin_sessions_offline"),
+            "deliveries_out": sum(v for n, _lb, v in samples if n == "saguin_deliveries_total"),
+                "sessions_offline": one(samples, "saguin_sessions_away"),
             "sessions_restored": one(samples, "saguin_sessions_restored_total"),
             "wills_waiting": one(samples, "saguin_wills_waiting"),
             "wills_cancelled": one(samples, "saguin_wills_cancelled_total"),
-            "session_queue_messages": one(samples, "saguin_session_queue_messages"),
-            "session_queue_bytes": one(samples, "saguin_session_queue_bytes"),
-            "shares_held": one(samples, "saguin_shares_held_total"),
-            "shares_drained": one(samples, "saguin_shares_drained_total"),
-            "retained": one(samples, "saguin_retained_messages"),
+            "retained": one(samples, "saguin_retained_values"),
             "qos2_held": one(samples, "saguin_qos2_held"),
             "qos2_abandoned": one(samples, "saguin_qos2_abandoned_total"),
-            "qos2_max_inflight": one(samples, "saguin_qos2_max_inflight_per_client"),
             "go_heap_live": one(samples, "saguin_go_heap_live_bytes"),
             "go_heap_goal": one(samples, "saguin_go_heap_goal_bytes"),
             "go_stack": one(samples, "saguin_go_stack_bytes"),
@@ -2626,69 +2646,39 @@ def api_metrics():
         # number is coming down. Counted from the client table at each scrape
         # rather than kept by increments, because a gauge maintained on
         # connect and disconnect is one that drifts.
-        "protocols": sorted(
-            [{"protocol": lb.get("protocol", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_connections_by_protocol")],
-            key=lambda r: r["protocol"]),
+        "protocols": split(samples, "saguin_connections", "protocol", "protocol", by_name=True),
         # **The series behind a fleet in a reconnect loop.** Every
         # connection the broker refused, whatever protocol the client speaks:
         # a CONNECT turned away, or a connection ended for a refusal.
         # Labelled with the same vocabulary as the refusals below, so the two
         # read directly against each other.
-        "connections_refused": sorted(
-            [{"reason": lb.get("reason", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_connections_refused_total")],
-            key=lambda r: -r["count"]),
+        "connections_refused": split(samples, "saguin_connections_refused_total", "reason", "reason"),
         # Labelled with the specification's name for the code the client was
         # answered with. This is what answers "the fleet's data is not
         # arriving" without reading a log.
-        "refusals": sorted(
-            [{"reason": lb.get("reason", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_publish_refused_total")],
-            key=lambda r: -r["count"]),
+        "refusals": split(samples, "saguin_publish_refused_total", "cause", "reason"),
         # The subscribing side of the same question: a SUBSCRIBE was answered
         # and its filter was refused, so the device gets nothing. Counted per
         # filter, by the code's name, before a 3.1.1 client's 0x80.
-        "subscription_refusals": sorted(
-            [{"reason": lb.get("reason", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_subscriptions_refused_total")],
-            key=lambda r: -r["count"]),
-        # **Why a delivery never reached a session**, by the broker's own
-        # closed set of causes: a session that filled up is not a group with
-        # nobody to take its messages, and each has a different fix.
-        "session_drops": sorted(
-            [{"cause": lb.get("cause", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_session_deliveries_dropped_total")],
-            key=lambda r: -r["count"]),
-        # **And why a group's backlog was given up on**, which is a third
-        # question again: a backlog at its bound, a group whose last member
-        # session ended so nobody was owed the messages any more, or one held
-        # past broker.share.expires_after. The middle cause is the rule that a
-        # backlog cannot outlive the sessions it belongs to.
-        "share_drops": sorted(
-            [{"cause": lb.get("cause", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_shares_dropped_total")],
-            key=lambda r: -r["count"]),
-        # **And why a session itself was not kept**, which is a different
-        # question with a different fix: a provider that was full when the
-        # client connected, an expiry that passed while the broker was
-        # stopped, a subscription this broker's rules now refuse.
+        "subscription_refusals": split(samples, "saguin_subscriptions_refused_total", "reason", "reason"),
+        # **Why a consumer never received records**, by the broker's own
+        # causes, added up over every channel: each has a different fix.
+        "session_drops": split(samples, "saguin_missed_total", "cause", "cause"),
+        # **What shared groups let go**, split by channel: records no member
+        # was left to take.
+        "share_drops": split(samples, "saguin_shares_dropped_total", "channel", "cause"),
         # **What the broker said on a client's behalf, and why it said it.**
         # A Will published because a delay ran out is a device that went
         # quiet; one published at a start is a death the broker could not
         # announce while it was down.
-        "wills": sorted(
-            [{"cause": lb.get("cause", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_wills_published_total")],
-            key=lambda r: -r["count"]),
-        "session_ends": sorted(
-            [{"cause": lb.get("cause", "?"), "count": v}
-             for lb, v in rows(samples, "saguin_sessions_dropped_total")],
-            key=lambda r: -r["count"]),
+        "wills": split(samples, "saguin_wills_published_total", "cause", "cause"),
+        # **Why sessions ended**, by the broker's own causes.
+        "session_ends": split(samples, "saguin_sessions_ended_total", "cause", "cause"),
         # **The catalogue's own words for each series**, so a card can say
         # what it is drawing without this page keeping a second glossary that
         # goes stale the day a metric's meaning is sharpened upstream.
         "help": described,
+        "families": families(samples),
         "channels": channel_rows,
         "queues": queue_rows,
         "providers": providers,
@@ -2824,7 +2814,7 @@ def api_consumers():
     """Which durable consumers are behind, and by how much.
 
     **The catalogue cannot answer this and never will.**
-    `saguin_channel_consumer_position_min` is one number per channel, so one
+    `saguin_channel_position_min` is one number per channel, so one
     straggler in a fleet of three hundred reads exactly like a fleet that has
     stopped - and a metric per consumer is impossible, because a client
     chooses its own id and Prometheus keeps a series for every label set it
@@ -2989,21 +2979,41 @@ def await_reply(info, ticket, timeout=5):
     broker is slow" about a broker that said no at once. Every verb that
     waits for a reply waits here, so none of them can forget the PUBACK.
 
-    Returns (reply, None), (None, reason code) for a refusal, or
-    (None, None) when neither came within the timeout.
+    **The 0.2.0 broker also answers a refusal in words** (`below-floor`, `malformed`,
+    `no-session`...), on the Response Topic beside the PUBACK's code, so a
+    refusal waits a moment more for those words.
+
+    Returns (reply, None, None), (None, reason code, the broker's words or
+    None) for a refusal, or (None, None, None) when neither came within the
+    timeout.
     """
     deadline = time.time() + timeout
-    rc = None
+    rc = reply = None
     while time.time() < deadline:
         with lock:
-            reply = seeks.pop(ticket, None)
+            reply = seeks.pop(ticket, reply)
             rc = pubacks.pop(info.mid, rc)
-        if reply is not None:
-            return reply, None
         if rc is not None and int(getattr(rc, "value", rc)) >= 0x80:
-            return None, rc
+            # The words may arrive just after the code.
+            words = min(time.time() + 0.5, deadline)
+            while reply is None and time.time() < words:
+                time.sleep(0.05)
+                with lock:
+                    reply = seeks.pop(ticket, None)
+            return None, rc, reply
+        if reply is not None:
+            # An answer, and no refusal yet: the code, if any, is a moment
+            # behind it.
+            settle = min(time.time() + 0.2, deadline)
+            while rc is None and time.time() < settle:
+                time.sleep(0.05)
+                with lock:
+                    rc = pubacks.pop(info.mid, None)
+            if rc is not None and int(getattr(rc, "value", rc)) >= 0x80:
+                return None, rc, reply
+            return reply, None, None
         time.sleep(0.05)
-    return None, None
+    return None, None, None
 
 
 def point_read(topic, timeout=5):
@@ -3032,7 +3042,7 @@ def point_read(topic, timeout=5):
         info.wait_for_publish(timeout)
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return None, f"{type(e).__name__}: {e}"
-    reply, refused = await_reply(info, ticket, timeout)
+    reply, refused, _said = await_reply(info, ticket, timeout)
     if reply is not None:
         return reply, None
     if refused is not None:
@@ -3491,16 +3501,15 @@ def api_feed():
 # thing an operator opens it for: why each record failed, and a way to put it
 # back once the bug is fixed.
 #
-# **Requeue needs nothing from the broker** - RFC 0003 "Putting dead-lettered
-# work back" says it is four lines of any MQTT client, because a queue takes an
-# ordinary publish. What it takes is care about three things, all of which this
+# **Requeue needs nothing from the broker**: it is four lines of any MQTT
+# client, because a queue takes an ordinary publish. What it takes is care about three things, all of which this
 # page can get wrong quietly:
 #
-#   * **Where the `__dlq` level sits.** RFC 0003 gives a rule - at the `#` for a
-#     filter ending in one, on the end otherwise - and reimplementing that rule
-#     is a way to be subtly wrong on a filter shape nobody tested. So it is not
-#     reimplemented: the dead-letter channel's *own* filter carries the level at
-#     exactly the position to remove (`jobs/__dlq/#`, `iot/+/work/+/__dlq`), and
+#   * **Where the `__dlq` level sits.** The 0.2.0 broker puts it first, as the prefix
+#     `__dlq/` (design.md, Channels, queue), and reimplementing that rule is a
+#     way to be wrong the day it changes. So it is not reimplemented: the
+#     dead-letter channel's *own* filter carries the level at exactly the
+#     position to remove (`__dlq/jobs/#`, `__dlq/iot/+/work/+`), and
 #     that filter comes from the broker's catalogue. The broker says where it
 #     put the level; this takes it out of the same place.
 #   * **The payload, byte for byte.** A requeue that re-encodes is a requeue
@@ -3510,7 +3519,7 @@ def api_feed():
 #     this would go wrong.
 #   * **The properties.** The publisher's own go back; `saguin-` ones do not,
 #     because the broker refuses them from any client - except `saguin-id`,
-#     which RFC 0003 makes the one reserved name a publisher may set and the
+#     the one reserved name a publisher may set (design.md, `$saguin` topics) and the
 #     whole reason to carry properties back at all. Pass it and a consumer can
 #     tell this is the same work returning rather than new work that looks like
 #     it. Drop it and the round trip is invisible to everyone downstream.
@@ -3956,7 +3965,7 @@ def api_requeue():
     """Put one dead letter back on the queue it came from.
 
     **One record, named by topic and sequence number.** There is no drain-all
-    and that is deliberate: RFC 0003 names the hazard - redriving into a queue
+    and that is deliberate, for a known hazard: redriving into a queue
     whose bug is not fixed dead-letters the job again, and doing it in a loop
     fills a disk. One record per call makes that self-limiting, and an operator
     putting fifty back is fifty deliberate acts.
@@ -4017,7 +4026,7 @@ def api_requeue():
         held = rec.get("properties") or {}
         # The publisher's own properties go back. The broker's do not - it
         # refuses the whole `saguin-` prefix from any client - except
-        # `saguin-id`, which RFC 0003 makes the one reserved name a publisher
+        # `saguin-id`, the one reserved name a publisher (design.md, `$saguin` topics)
         # may set, and which is what lets a consumer tell this is the same work
         # coming round again rather than new work that looks like it.
         pairs = [(str(k), str(v)) for k, v in held.items() if not k.startswith("saguin-")]
@@ -4054,7 +4063,7 @@ def api_requeue():
         "id": sid,
         "reason": resp.get("reason"),
         # Said rather than discovered, because both are surprising if you have
-        # not read RFC 0003 and both matter to whoever is watching the queue.
+        # not read the design and both matter to whoever is watching the queue.
         "note": "back as a new record: a new offset and an attempt count starting "
                 "at 1. Its saguin-id is carried over, so a consumer can tell it is "
                 "the same work returning." if (rec.get("properties") or {}).get("saguin-id")
@@ -4120,13 +4129,24 @@ def api_seek():
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
-    reply, refused = await_reply(info, ticket)
+    reply, refused, said = await_reply(info, ticket)
+    with lock:
+        floor = seek_props.pop(ticket, {}).get("saguin-floor")
     if reply is not None:
         return jsonify({"ok": True, "reply": reply, "position": position,
                         "channel": channel})
     if refused is not None:
         code = int(getattr(refused, "value", refused))
-        error = f"the broker refused it: {refused}"
+        error = f"the broker refused it: {said or refused}"
+        if said == "below-floor" and floor is not None:
+            # design.md, $saguin topics: "below-floor (User Property
+            # saguin-floor: the floor)" - retention has removed what was asked
+            # for, and the floor is where the channel starts now.
+            error = (f"the broker refused it: below-floor - retention has removed "
+                     f"the records from then; the oldest still held is offset {floor}. "
+                     f"Choose \"everything still held\" to start there.")
+            return jsonify({"ok": False, "channel": channel, "position": position,
+                            "error": error, "floor": floor}), 502
         if code == 0x87:
             # One overwhelmingly likely cause, so say it.
             error += (f" - seeking {channel} takes `seek` on that channel in the "
@@ -4166,7 +4186,7 @@ def api_disconnect():
 
     **It withdraws nothing on its own.** The device comes back with whatever
     the broker's password file and acl_file say then. Taking access away is
-    RFC 0002's "Withdrawing a device's access": edit the two files, signal the
+    the design's way (design.md, Access and reload): edit the two files, signal the
     broker with SIGUSR1 to re-read them, then hang the client up so that it
     connects again and is refused - the acl_file is already in force on the
     open connection, the password file is only read at CONNECT. What the
@@ -4213,7 +4233,7 @@ def api_disconnect():
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
-    reply, rc = await_reply(info, ticket)
+    reply, rc, _said = await_reply(info, ticket)
     if reply is not None:
         return jsonify({"ok": True, "client_id": client_id, "reply": reply,
                         "hung_up": reply == "hung-up"})

@@ -1,0 +1,33 @@
+# Channels: the series metrics.md lists under "Channels and retained values", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Channels"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Channels and retained values
+      Each channel's records, bytes, offsets and consumers, what retention removed, and the retained values.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Retained values", metric: saguin_retained_values }
+  - { type: stat, width: 3, title: "Retained bytes", metric: saguin_retained_bytes, format: bytes }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Channel records",
+      metric: saguin_channel_records, by: channel }
+  - { type: breakdown, width: 6, height: medium, title: "Channel bytes",
+      metric: saguin_channel_bytes, by: channel }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Channel next offset",
+      metric: saguin_channel_next_offset, by: channel }
+  - { type: breakdown, width: 6, height: medium, title: "Channel floor offset",
+      metric: saguin_channel_floor_offset, by: channel }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Channel retention removed",
+      metric: saguin_channel_retention_removed_total, by: channel }
+  - { type: breakdown, width: 6, height: medium, title: "Channel consumers",
+      metric: saguin_channel_consumers, by: channel }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Channel position min",
+      metric: saguin_channel_position_min, by: channel }

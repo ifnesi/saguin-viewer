@@ -49,13 +49,11 @@ func freePort(t *testing.T) int {
 // brokerConfig is the smallest broker that answers on both doors, with the
 // credential line left as a placeholder.
 //
-// **Whether there is a password file changes what the socket asks for**, which
-// is the rule RFC 0005 warns is worth knowing before one is configured: the
-// credential "applies to every transport the listener answers on, including the
-// Unix socket", and the socket's permissions are a second gate rather than an
-// alternative to the first. So both arrangements are built below, and the first
-// draft of this file got it wrong in the direction an operator would - it
-// expected the socket to be exempt.
+// **Both arrangements are built below, with and without an operators' password
+// file**, because the 0.2.0 broker's rule differs between the doors: a request
+// with no credential reaches every route on a loopback address or the Unix
+// socket, and a credential that is offered is checked on every door, a wrong
+// one refused (design.md, Operations, Who may call).
 const brokerConfig = `
 broker:
   id: %[1]s
@@ -73,23 +71,19 @@ broker:
         mode: "0600"
 %[5]s    min_scrape_interval: 90s
   storage:
-    default: mem
+    file_path: %[7]s
     default_retention_period: none
     default_retention_bytes: none
-    providers:
-      - mem:
-          type: memory
-          snapshot_dir: none
 channels:
-  - events:
-      type: append
-      filter: iot/+/events/+
-    state:
-      type: latest
-      filter: iot/+/state/+
-    jobs:
-      type: queue
-      filter: iot/+/work/+
+  events:
+    type: append
+    filter: iot/+/events/+
+  state:
+    type: latest
+    filter: iot/+/state/+
+  jobs:
+    type: queue
+    filter: iot/+/work/+
 bridges:
   head-office:
     # Nothing listens there. A bridge that cannot connect still publishes every
@@ -98,8 +92,8 @@ bridges:
     peer: tcp://127.0.0.1:%[6]d
     client_id: drift-bridge
     topics:
-      - filter: upstream/#
-        topic: iot/depot/events/$#
+      - filter: upstream/+
+        topic: iot/depot/events/$1
         direction: in
 `
 
@@ -149,7 +143,7 @@ func startBrokerWith(t *testing.T, guarded bool, edit func(string) string) *brok
 		credential = "    password_file: " + passwd + "\n"
 	}
 	body := fmt.Sprintf(brokerConfig, "edge-07", freePort(t), opsPort, socket,
-		credential, freePort(t))
+		credential, freePort(t), filepath.Join(dir, "saguin.db"))
 	if edit != nil {
 		body = edit(body)
 	}
@@ -177,7 +171,7 @@ func startBrokerWith(t *testing.T, guarded bool, edit func(string) string) *brok
 
 	// **The socket appearing is the readiness signal**, because it is bound with
 	// the listeners at startup and snapshots are loaded before any of them binds
-	// (RFC 0005, "There is no /ready").
+	// (design.md, Operations: /health is the readiness check).
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := Unix(socket, 5*time.Second).get("/health"); err == nil {
@@ -222,7 +216,7 @@ func TestARealScrapeParsesWhole(t *testing.T) {
 				"about it", m.Name)
 		}
 		if m.Kind != "gauge" && m.Kind != "counter" {
-			t.Errorf("%s is a %q, and RFC 0005's catalogue has only gauges and "+
+			t.Errorf("%s is a %q, and metrics.md lists only gauges and "+
 				"counters", m.Name, m.Kind)
 		}
 	}
@@ -242,7 +236,7 @@ func TestARealScrapeParsesWhole(t *testing.T) {
 	}
 	for channel, filter := range map[string]string{
 		"events": "iot/+/events/+", "state": "iot/+/state/+",
-		"jobs": "iot/+/work/+", "jobs__dlq": "iot/+/work/+/__dlq",
+		"jobs": "iot/+/work/+", "jobs__dlq": "__dlq/iot/+/work/+",
 	} {
 		if filters[channel] != filter {
 			t.Errorf("channel %q has filter %q, the configuration wrote %q",
@@ -257,9 +251,10 @@ func TestARealScrapeParsesWhole(t *testing.T) {
 	}
 }
 
-// TestADoorNamingNoPasswordFileHasNoCredential. RFC 0005: "A door naming no
-// file anywhere has no credential at all", and the socket's file permissions are
-// what decide who may speak to it. This is the arrangement the tool defaults to,
+// TestADoorNamingNoPasswordFileHasNoCredential. With no operators' password
+// file, a request with no credential reaches every route on the socket, whose
+// file permissions decide who may speak to it (design.md, Operations, Who may
+// call). This is the arrangement the tool defaults to,
 // so it is the one that has to work with nothing configured.
 func TestADoorNamingNoPasswordFileHasNoCredential(t *testing.T) {
 	b := startBroker(t, false)
@@ -277,22 +272,26 @@ func TestADoorNamingNoPasswordFileHasNoCredential(t *testing.T) {
 	}
 }
 
-// TestACredentialAppliesToTheSocketToo, which is the rule RFC 0005 says is
-// "worth knowing before configuring one": the credential "applies to every
-// transport the listener answers on, including the Unix socket. The socket's
-// permissions are a second gate rather than an alternative to the first."
+// TestALocalDoorNeedsNoCredentialButAWrongOneIsRefused, the 0.2.0 broker's rule
+// (design.md, Operations, Who may call): "A request with no credential
+// reaches every route only on a loopback address or Unix socket, and only
+// when its Host is an IP literal or localhost"; "A rejected credential gets
+// 401"; "The selected source is used alone. Failure does not fall back."
 //
-// **The first draft of this file assumed the opposite** - that a socket was
-// exempt - and the broker answered 401, correctly. That is the mistake an
-// operator makes with this setting, so it is the one worth a case.
-func TestACredentialAppliesToTheSocketToo(t *testing.T) {
+// **rc1 said the opposite** - that the credential applied to the socket too -
+// so a viewer on the broker's own machine needs no password in 0.2.0, and one
+// that offers a wrong password is still refused rather than let through as if
+// it had offered none.
+func TestALocalDoorNeedsNoCredentialButAWrongOneIsRefused(t *testing.T) {
 	b := startBroker(t, true)
 	for _, c := range []struct {
 		name     string
 		src      *Source
 		wantFail bool
 	}{
-		{"the socket with nothing offered", Unix(b.socket, 10*time.Second), true},
+		{"the socket with nothing offered", Unix(b.socket, 10*time.Second), false},
+		{"the socket with the wrong password",
+			socketAs(b.socket, "operator", "wrong"), true},
 		{"the socket with the credential",
 			socketAs(b.socket, "operator", "s3cret"), false},
 		{"the address with the credential",
@@ -336,10 +335,11 @@ func TestTheBrokerIsAskedHowOftenItRecomputes(t *testing.T) {
 // TestTheBrokerFillsTheDefaultIn, which it did not when this program was
 // written.
 //
-// **This case was the opposite of itself yesterday.** RFC 0005 says
-// /v1/operations/config answers with "every default filled in", and a broker that
+// **This case was the opposite of itself once.** /v1/operations/config answers
+// with the resolved configuration, every default filled in (design.md,
+// Operations), and a broker that
 // left min_scrape_interval at its default served an operations section without
-// it - so this program carried the RFC's minute as a fallback and a case here
+// it - so this program carried a minute of its own as a fallback and a case here
 // recorded the gap, failing on the day it closed and saying to delete the
 // fallback. It closed: saguin fills it in, reasoning that a fallback here was "a
 // second place for the number to be wrong". The fallback is gone and this case
@@ -357,13 +357,13 @@ func TestTheBrokerFillsTheDefaultIn(t *testing.T) {
 	got, err := Unix(b.socket, 10*time.Second).MinScrapeInterval()
 	if err != nil {
 		t.Fatalf("the broker serves no min_scrape_interval when nothing wrote "+
-			"one, although RFC 0005 says the resolved configuration has every "+
+			"one, although the resolved configuration has every "+
 			"default filled in: %v\nThe broker said:\n%s", err, b.said())
 	}
-	// RFC 0005: "A minute is the floor and the default, and a shorter one is a
-	// startup error."
+	// config.md, broker.operations: min_scrape_interval defaults to 60s and is
+	// at least 60s.
 	if want := time.Minute; got != want {
-		t.Errorf("the default is %v; RFC 0005 says the floor and the default are "+
+		t.Errorf("the default is %v; config.md says the floor and the default are "+
 			"both %v", got, want)
 	}
 }
@@ -377,15 +377,13 @@ func socketAs(path, user, password string) *Source {
 }
 
 // TestTheShippedDefaultDrawsAgainstARealBroker. The unit case holds it to
-// RFC 0005's catalogue, which is a document; this holds it to a broker that has
+// metrics.md, which is a document; this holds it to a broker that has
 // one of each channel type and a bridge, which is what the default was written
 // for.
 //
 // **Three families are legitimately absent, and each for what it is rather
-// than for this broker.** The two refusal counters follow the rule RFC 0005
-// states for them - "no series until a provider has failed ... a rate over a
-// series that does not exist is nothing, and nothing has gone wrong" - and
-// nothing was refused here. `saguin_channel_consumer_position_min` is one
+// than for this broker.** A refusal counter carries a series for a reason only
+// once something has been refused with it, and nothing was refused here. `saguin_channel_position_min` is one
 // position per durable consumer and nobody has consumed, so there is no lowest
 // position to take. Anything else absent is the default naming a metric this
 // broker should have served.
@@ -408,13 +406,10 @@ func TestTheShippedDefaultDrawsAgainstARealBroker(t *testing.T) {
 		t.Fatalf("the shipped default refused a real broker: %v", err)
 	}
 	allowed := map[string]bool{
-		"saguin_publish_refused_total":         true,
-		"saguin_subscriptions_refused_total":   true,
-		"saguin_connections_refused_total":     true,
-		"saguin_channel_consumer_position_min": true,
-		// RFC 0005: "no series until a provider has failed", so a healthy
-		// broker serves none.
-		"saguin_storage_errors_total": true,
+		"saguin_publish_refused_total":       true,
+		"saguin_subscriptions_refused_total": true,
+		"saguin_connections_refused_total":   true,
+		"saguin_channel_position_min":        true,
 	}
 	for _, name := range absent {
 		if !allowed[name] {

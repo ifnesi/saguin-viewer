@@ -1,0 +1,30 @@
+# Store: the series metrics.md lists under "Store and memory", each drawn once.
+# A card's description is the broker's own HELP line for its series.
+title: "Store"
+grid:
+  columns: 12
+
+cards:
+  - type: text
+    markdown: |
+      # Store and memory
+      The database and its log, commits, a full disk, waits for the writer, snapshots in memory mode, and message memory.
+
+  - { type: break }
+  - { type: stat, width: 3, title: "Store bytes", metric: saguin_store_bytes, format: bytes }
+  - { type: stat, width: 3, title: "Store wal bytes", metric: saguin_store_wal_bytes, format: bytes }
+  - { type: stat, width: 3, title: "Store full", metric: saguin_store_full, alarm: "> 0" }
+  - { type: stat, width: 3, title: "Store no credit seconds", metric: saguin_store_no_credit_seconds_total, format: duration, alarm: "> 0" }
+  - { type: break }
+  - { type: stat, width: 3, title: "Store committed records", metric: saguin_store_committed_records_total }
+  - { type: stat, width: 3, title: "Snapshot last success timestamp seconds", metric: saguin_snapshot_last_success_timestamp_seconds }
+  - { type: stat, width: 3, title: "Snapshot last duration seconds", metric: saguin_snapshot_last_duration_seconds, format: duration }
+  - { type: stat, width: 3, title: "Memory in transit bytes", metric: saguin_memory_in_transit_bytes, format: bytes }
+  - { type: break }
+  - { type: stat, width: 3, title: "Memory max bytes", metric: saguin_memory_max_bytes, format: bytes }
+  - { type: stat, width: 3, title: "Memory full seconds", metric: saguin_memory_full_seconds_total, format: duration, alarm: "> 0" }
+  - { type: break }
+  - { type: breakdown, width: 6, height: medium, title: "Store commits",
+      metric: saguin_store_commits_total, by: closed_by }
+  - { type: breakdown, width: 6, height: medium, title: "Snapshots",
+      metric: saguin_snapshots_total, by: result }

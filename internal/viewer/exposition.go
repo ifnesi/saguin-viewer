@@ -1,7 +1,8 @@
 // Package viewer reads a saguin broker's operations listener and draws one
-// screen of it. RFC 0005 is what it is written against: the listener's paths,
-// the metrics catalogue, and the rule that the broker rather than the reader
-// decides how often the numbers are recomputed.
+// screen of it. Sagüin's design is what it is written against: the listener's
+// paths (design.md, Operations), the series and their HELP lines (metrics.md),
+// and the rule that the broker rather than the reader decides how often its
+// stored numbers are re-read.
 package viewer
 
 import (
@@ -31,7 +32,7 @@ type Metric struct {
 //
 // **At is when this program read the body, which is not when the broker
 // computed it.** A scrape arriving inside min_scrape_interval is answered from
-// the previous computation (RFC 0005, "The observer does not set the cost"), so
+// the previous reading (config.md, min_scrape_interval), so
 // a sample can be up to one interval older than this. The screen says both
 // numbers for that reason: how long ago it was read, and how often the broker
 // recomputes.
@@ -135,7 +136,7 @@ func (s *Scrape) comment(line string, where int) error {
 	m := s.family(name)
 	if kind == "HELP" {
 		// **Taken whole, to the end of the line.** These sentences carry
-		// backticks, braces, quotes and dashes - RFC 0005 writes them that way -
+		// colons, quotes, brackets and dashes - metrics.md's Meanings hold them -
 		// and a parser that split on any of them would show half a sentence.
 		m.Help = tail
 		return nil

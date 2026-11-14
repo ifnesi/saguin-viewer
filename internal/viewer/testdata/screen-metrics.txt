@@ -33,10 +33,10 @@ saguin_channel_next_offset{channel="jobs"} 413
 saguin_channel_floor_offset{channel="events"} 900000
 saguin_channel_floor_offset{channel="telemetry"} 1
 saguin_channel_floor_offset{channel="jobs"} 1
-# HELP saguin_channel_consumer_position_min The lowest stored position on this channel.
-# TYPE saguin_channel_consumer_position_min gauge
-saguin_channel_consumer_position_min{channel="events"} 899998
-saguin_channel_consumer_position_min{channel="telemetry"} 88000
+# HELP saguin_channel_position_min The lowest stored position on this channel.
+# TYPE saguin_channel_position_min gauge
+saguin_channel_position_min{channel="events"} 899998
+saguin_channel_position_min{channel="telemetry"} 88000
 # HELP saguin_queue_depth Records waiting to be handed out.
 # TYPE saguin_queue_depth gauge
 saguin_queue_depth{channel="jobs"} 412

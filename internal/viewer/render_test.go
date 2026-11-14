@@ -23,9 +23,9 @@ groups:
       - saguin_channel_bytes
       - saguin_channel_next_offset
       - name: behind
-        value: saguin_channel_next_offset - saguin_channel_consumer_position_min
+        value: saguin_channel_next_offset - saguin_channel_position_min
       - name: data lost
-        value: saguin_channel_floor_offset > saguin_channel_consumer_position_min
+        value: saguin_channel_floor_offset > saguin_channel_position_min
       - name: per record
         value: saguin_channel_bytes / saguin_channel_records
         format: bytes
@@ -144,8 +144,8 @@ func TestTheAgeIsOfTheScrapeRatherThanOfTheRedraw(t *testing.T) {
 	}
 }
 
-// TestTheScreenSaysTheIntervalItSettledOn. RFC 0005 refuses to raise a
-// configured interval quietly, on the grounds that an operator who writes 10s
+// TestTheScreenSaysTheIntervalItSettledOn. An interval raised quietly misleads:
+// an operator who writes 10s
 // and is silently given a minute reads their graphs at the wrong scale. The same
 // argument applies to a screen.
 func TestTheScreenSaysTheIntervalItSettledOn(t *testing.T) {
@@ -174,7 +174,7 @@ func TestTheScreenSaysTheIntervalItSettledOn(t *testing.T) {
 }
 
 // **There was a case here about an assumed interval, and it is gone with the
-// behaviour.** This program carried RFC 0005's floor as a fallback while the
+// behaviour.** This program carried a floor of its own as a fallback while the
 // broker's resolved configuration omitted a min_scrape_interval left at its
 // default, and the screen said "assumed" so that a number from this program's own
 // default could not be mistaken for the broker's. saguin fills the default in
@@ -219,8 +219,8 @@ func TestNoneOfItIsSilent(t *testing.T) {
 	}
 }
 
-// TestTheHeaderNamesTheBrokerAndTheDoor - and no hostname, because RFC 0005
-// publishes none and one invented here would be this machine's rather than the
+// TestTheHeaderNamesTheBrokerAndTheDoor - and no hostname, because the broker
+// publishes none (metrics.md) and one invented here would be this machine's rather than the
 // broker's.
 func TestTheHeaderNamesTheBrokerAndTheDoor(t *testing.T) {
 	s, _ := screen(t, 120)
@@ -309,9 +309,9 @@ func TestWidthFallsBackToEightyWithNoTerminal(t *testing.T) {
 	}
 }
 
-// TestAnEntityMissingOneMetricGetsADashRatherThanAZero. RFC 0005:
-// saguin_channel_bytes does not measure a `latest` channel, so such a channel
-// has no sample of it - and a zero would say the channel holds nothing.
+// TestAnEntityMissingOneMetricGetsADashRatherThanAZero. A channel the scrape
+// has no sample of for a series has none to show, and a zero would say the
+// channel holds nothing.
 func TestAnEntityMissingOneMetricGetsADashRatherThanAZero(t *testing.T) {
 	sc, err := ParseScrape(`# HELP saguin_channel_records n
 # TYPE saguin_channel_records gauge
@@ -466,7 +466,7 @@ func TestAComputedColumnDrawsItsAnswerRatherThanItsOperands(t *testing.T) {
 	}
 	// **The condition reads as a word and only when it is true.** events has a
 	// floor of 900,000 above that position, so retention has passed a consumer -
-	// the one alert RFC 0005 says the catalogue exists for. telemetry has not.
+	// the alert that matters most. telemetry has not.
 	if !strings.HasSuffix(strings.TrimSpace(rows["events"]), "359 B") ||
 		!strings.Contains(rows["events"], "yes") {
 		t.Errorf("events should say yes and end in a byte figure: %q", rows["events"])
@@ -662,9 +662,9 @@ func defaultAgainstAPartialScrape(t *testing.T) (*Dashboard, *Scrape, []string) 
 //
 // **Found driving the shipped dashboard against a broker nothing had
 // consumed from.** `behind` and `data lost` both read
-// saguin_channel_consumer_position_min, so the foot of the screen read "not served
-// by this broker: saguin_channel_consumer_position_min,
-// saguin_channel_consumer_position_min, ...". The list is what this broker does
+// saguin_channel_position_min, so the foot of the screen read "not served
+// by this broker: saguin_channel_position_min,
+// saguin_channel_position_min, ...". The list is what this broker does
 // not serve, not a tally of disappointed columns.
 func TestAMetricIsReportedAbsentOnceHoweverManyColumnsWantedIt(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("testdata", "screen-metrics.txt"))
@@ -673,9 +673,9 @@ func TestAMetricIsReportedAbsentOnceHoweverManyColumnsWantedIt(t *testing.T) {
 	}
 	// Take the consumer position out, which is the state of a broker nothing has
 	// consumed from durably - and the state this was found in.
-	trimmed := regexp.MustCompile(`(?m)^.*saguin_channel_consumer_position_min.*\n`).
+	trimmed := regexp.MustCompile(`(?m)^.*saguin_channel_position_min.*\n`).
 		ReplaceAllString(string(body), "")
-	if strings.Contains(trimmed, "saguin_channel_consumer_position_min") {
+	if strings.Contains(trimmed, "saguin_channel_position_min") {
 		t.Fatal("the metric is still in the scrape, so this case is not in the " +
 			"state it says it is")
 	}
@@ -699,7 +699,7 @@ func TestAMetricIsReportedAbsentOnceHoweverManyColumnsWantedIt(t *testing.T) {
 	for _, g := range d.Groups {
 		for _, c := range g.Columns {
 			for _, name := range c.Reads() {
-				if name == "saguin_channel_consumer_position_min" {
+				if name == "saguin_channel_position_min" {
 					readers++
 				}
 			}

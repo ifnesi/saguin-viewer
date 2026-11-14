@@ -65,9 +65,9 @@ saguin_connections 41
 saguin_build_info{version="0.1.0",broker_id="edge-07"} 1
 `
 
-// TestASocketReachesAScrapeWithNoCredential. RFC 0005: a door naming no
-// password file anywhere has no credential at all, and the socket's permissions
-// are the gate. This is the default door, so it is the one that has to work with
+// TestASocketReachesAScrapeWithNoCredential. A request with no credential
+// reaches every route on the Unix socket, and the socket's permissions are the
+// gate (design.md, Operations, Who may call). This is the default door, so it is the one that has to work with
 // nothing configured.
 func TestASocketReachesAScrapeWithNoCredential(t *testing.T) {
 	// **Not t.TempDir().** A Unix socket path may be 107 characters and the
@@ -119,8 +119,8 @@ func TestASocketReachesAScrapeWithNoCredential(t *testing.T) {
 	}
 }
 
-// TestATCPDoorWithACredentialReachesAScrape, which is the arrangement RFC 0005
-// requires on any address that is not loopback: the broker refuses to start on
+// TestATCPDoorWithACredentialReachesAScrape, which is the arrangement Sagüin
+// requires on any address that is not loopback (config.md, broker.operations): the broker refuses to start on
 // a routable address with no password file governing it.
 func TestATCPDoorWithACredentialReachesAScrape(t *testing.T) {
 	d := &door{metrics: twoMetrics, requires: "prometheus:s3cret",
@@ -147,7 +147,8 @@ func TestATCPDoorWithACredentialReachesAScrape(t *testing.T) {
 }
 
 // TestARejectedCredentialSaysToTryAnother and TestACredentialOutOfScopeSaysToWiden
-// are separate because RFC 0005 makes them different answers on purpose: a 401
+// are separate because the broker makes them different answers on purpose
+// (design.md, Operations, Who may call): a 401
 // sends an operator to check a password, a 403 says the password is right and
 // does not reach this route. A message that conflates them sends them to the
 // wrong place.
@@ -168,7 +169,7 @@ func TestARejectedCredentialSaysToTryAnother(t *testing.T) {
 }
 
 func TestACredentialOutOfScopeSaysToWiden(t *testing.T) {
-	// A user scoped to /metrics, exactly as RFC 0005's own password file writes
+	// A user scoped to /metrics, as the design's operators' password file writes
 	// one: `prometheus:$7$…:/metrics`.
 	d := &door{metrics: twoMetrics, requires: "prometheus:s3cret", scopes: "/metrics",
 		config: `{"operations":{"min_scrape_interval":"60s"}}`}
@@ -190,9 +191,8 @@ func TestACredentialOutOfScopeSaysToWiden(t *testing.T) {
 	}
 }
 
-// TestTheIntervalIsAskedForBySection, because RFC 0005 warns that the whole
-// route hands over the resolved configuration in full - every channel's name,
-// filter, type and provider - and this wants one duration.
+// TestTheIntervalIsAskedForBySection, because the whole route hands over the
+// resolved configuration in full - every channel - and this wants one duration.
 func TestTheIntervalIsAskedForBySection(t *testing.T) {
 	d := &door{config: `{"operations":{"min_scrape_interval":"90s"}}`}
 	srv := httptest.NewServer(d.handler())
@@ -212,9 +212,9 @@ func TestTheIntervalIsAskedForBySection(t *testing.T) {
 
 // TestAnAbsentIntervalIsRefused.
 //
-// **This used to assume RFC 0005's floor, and that was the wrong shape.** While
+// **This used to assume a floor of its own, and that was the wrong shape.** While
 // saguin's resolved configuration omitted a min_scrape_interval left at its
-// default, this program carried the RFC's minute as a fallback - which saguin,
+// default, this program carried a minute of its own as a fallback - which saguin,
 // fixing it, called "a second place for the number to be wrong". It was: a screen
 // clamped against a minute this program assumed, on a broker recomputing at
 // something else, is confidently out of step and says nothing. So the broker's

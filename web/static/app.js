@@ -158,7 +158,7 @@ function Node({ name, node, path, depth, open, toggle, selected, select, showQue
 
         ${depth === 0
           ? html`<span class="leafcount" title=${chan === "queue"
-                ? "unresolved work, from saguin_queue_depth - a queue publishes no record count, because resolution removes from the middle rather than the front"
+                ? "unresolved work, from saguin_queue_jobs - a queue publishes no record count, because resolution removes from the middle rather than the front"
                 : chan === "latest"
                   ? "how many topics hold a current value - a latest channel keeps one per topic, so that count is what it holds"
                   : "what the broker says this channel holds - the same number the dashboard draws"}>
@@ -828,7 +828,7 @@ function Publish({ topic, channel, kind, standalone }) {
 
 // **Which consumers are behind, and by how much.**
 //
-// The catalogue cannot say. `saguin_channel_consumer_position_min` is one
+// The catalogue cannot say. `saguin_channel_position_min` is one
 // number per channel, so one straggler in a fleet of three hundred reads
 // exactly like a fleet that has stopped - and no metric can name them,
 // because a client chooses its own id and Prometheus keeps a series for
@@ -1009,7 +1009,7 @@ function PositionLost() {
 //
 // The counts on the dashboard cannot answer this: three hundred devices with
 // two hundred connected is either a rota or a hundred that have stopped
-// calling, and `saguin_connections` beside `saguin_sessions_offline` reads
+// calling, and `saguin_connections` beside `saguin_sessions_away` reads
 // the same for both.
 //
 // **The lag column is joined from `/api/consumers` rather than asked for
@@ -1692,23 +1692,33 @@ const sumOf = (list, field) => (b, h, d) => {
 const splitOf = (list, field) => d =>
   rowsOf(d, list, field).map(r => ({ label: r.name, value: r[field] }));
 
+// **Any family by name**, from the scrape's generic totals: its sum for a
+// stat, its split by one label for a breakdown.
+const famTotal = name => (b, h, d) => {
+  const f = (d.families || {})[name];
+  return f ? f.total : null;
+};
+const famSplit = (name, label) => d =>
+  Object.entries((((d.families || {})[name] || {}).by || {})[label] || {})
+    .map(([k, v]) => ({ label: k, value: v }));
+
 const METRIC_MAP = {
-  saguin_connections:                    { hist: "connections",    cur: b => b.connections },
+  saguin_connections:                    { hist: "connections",    cur: b => b.connections,
+                                           breakdown: d => (d.protocols || []).map(p => ({ label: "MQTT " + p.protocol, value: p.count })) },
   saguin_subscriptions:                  { hist: "subscriptions",  cur: b => b.subscriptions },
   saguin_uptime_seconds:                 { cur: b => b.uptime, fmt: "duration" },
-  saguin_published_total:                { hist: "published",      cur: (b, h) => _last(h, "published") },
+  saguin_records_stored_total:                { hist: "published",      cur: (b, h) => _last(h, "published") },
   saguin_publishes_received_total:       { hist: "publishes_in",   cur: (b, h) => _last(h, "publishes_in") },
-  saguin_deliveries_sent_total:          { hist: "deliveries_out", cur: (b, h) => _last(h, "deliveries_out") },
+  saguin_deliveries_total:          { hist: "deliveries_out", cur: (b, h) => _last(h, "deliveries_out") },
   saguin_bytes_received_total:           { hist: "bytes_in",       cur: (b, h) => _last(h, "bytes_in"), fmt: "bytes" },
   saguin_bytes_sent_total:               { hist: "bytes_out",      cur: (b, h) => _last(h, "bytes_out"), fmt: "bytes" },
-  saguin_queue_depth:                    { hist: "queue_depth",    cur: (b, h) => _last(h, "queue_depth") },
-  saguin_connections_total:              { cur: b => b.connections_total },
-  saguin_broadcast_unmatched_total:      { hist: "unmatched",      cur: b => b.unmatched },
-  saguin_deliveries_dropped_total:       { hist: "dropped",        cur: b => b.dropped },
-  saguin_deliveries_refused_total:       { cur: b => b.deliveries_refused },
+  saguin_queue_jobs:                    { hist: "queue_depth",    cur: (b, h) => _last(h, "queue_depth"), breakdown: famSplit("saguin_queue_jobs", "state") },
+  saguin_connections_accepted_total:              { cur: b => b.connections_total },
+  saguin_missed_total:       { hist: "dropped",        cur: b => b.dropped,
+                                           breakdown: d => (d.session_drops || []).map(r => ({ label: r.cause, value: r.count })) },
   saguin_deliveries_expired_total:       { cur: b => b.expired },
-  saguin_session_expiry_shortened_total: { cur: b => b.session_expiry_shortened },
-  saguin_sessions_offline:               { cur: b => b.sessions_offline },
+  saguin_session_expiry_capped_total: { cur: b => b.session_expiry_shortened },
+  saguin_sessions_away:               { cur: b => b.sessions_offline },
   // What the last start did to a fleet's sessions. Neither carries a line:
   // both move once, at the start, and a line of a number that changes once
   // is a flat line with a step nobody is watching for.
@@ -1720,27 +1730,20 @@ const METRIC_MAP = {
                                            breakdown: d => (d.wills || []).map(r => ({ label: r.cause, value: r.count })) },
   saguin_wills_cancelled_total:          { cur: b => b.wills_cancelled },
   saguin_wills_waiting:                  { hist: "wills_waiting", cur: b => b.wills_waiting },
-  saguin_sessions_dropped_total:         { cur: (b, h, d) => (d.session_ends || []).reduce((a, r) => a + r.count, 0),
+  saguin_sessions_ended_total:         { cur: (b, h, d) => (d.session_ends || []).reduce((a, r) => a + r.count, 0),
                                            breakdown: d => (d.session_ends || []).map(r => ({ label: r.cause, value: r.count })) },
-  saguin_session_queue_messages:         { hist: "session_queue_messages", cur: b => b.session_queue_messages },
-  saguin_session_queue_bytes:            { hist: "session_queue_bytes", cur: b => b.session_queue_bytes, fmt: "bytes" },
-  saguin_session_deliveries_dropped_total: { cur: (b, h, d) => (d.session_drops || []).reduce((a, r) => a + r.count, 0),
-                                             breakdown: d => (d.session_drops || []).map(r => ({ label: r.cause, value: r.count })) },
   // Shared groups: what was put on a group's list, what was handed to a
   // member, and what was let go otherwise - held minus the other two is what
   // the groups hold now. No line on any of the three - all counters that only
   // climb.
-  saguin_shares_held_total:              { cur: b => b.shares_held },
-  saguin_shares_drained_total:           { cur: b => b.shares_drained },
   saguin_shares_dropped_total:           { cur: (b, h, d) => (d.share_drops || []).reduce((a, r) => a + r.count, 0),
                                            breakdown: d => (d.share_drops || []).map(r => ({ label: r.cause, value: r.count })) },
-  saguin_retained_messages:              { cur: b => b.retained },
+  saguin_retained_values:              { cur: b => b.retained },
   // Exactly-once. `hist` on the first two because both are worth a line: one
   // should fall back to nothing between bursts, the other only climbs. The
   // allowance is configured, so a line of it is flat by construction.
   saguin_qos2_held:                      { hist: "qos2_held",      cur: b => b.qos2_held },
   saguin_qos2_abandoned_total:           { hist: "qos2_abandoned", cur: b => b.qos2_abandoned },
-  saguin_qos2_max_inflight_per_client:   { cur: b => b.qos2_max_inflight },
   saguin_publish_refused_total:          { cur: (b, h, d) => (d.refusals || []).reduce((a, r) => a + r.count, 0),
                                            breakdown: d => (d.refusals || []).map(r => ({ label: r.reason, value: r.count })) },
   saguin_subscriptions_refused_total:    { cur: (b, h, d) => (d.subscription_refusals || []).reduce((a, r) => a + r.count, 0),
@@ -1757,17 +1760,13 @@ const METRIC_MAP = {
   saguin_go_allocated_objects_total:     { hist: "go_alloc_objects", cur: (b, h) => _last(h, "go_alloc_objects") },
   saguin_go_gogc_percent:                { cur: b => b.go_gogc },
   saguin_go_memory_limit_bytes:          { cur: b => b.go_memory_limit, fmt: "bytes_or_none" },
-  saguin_connections_by_protocol:        { breakdown: d => (d.protocols || []).map(p => ({ label: "MQTT " + mqttName(p.protocol), value: p.count })) },
   saguin_connections_refused_total:      { breakdown: d => (d.connections_refused || []).map(r => ({ label: r.reason, value: r.count })) },
   // **Named for a value, split for a chart.** A meter comparing one store's
   // fill with its own bound has to name which store; a breakdown of the same
   // family is over every one of them and must not, or a shipped dashboard
   // would name a provider that exists on the broker it was written against
   // and on no other.
-  saguin_provider_bytes:                 { provider: p => p.bytes, fmt: "bytes", breakdown: splitOf("providers", "bytes") },
-  saguin_provider_max_bytes:             { provider: p => p.max_bytes, fmt: "bytes", breakdown: splitOf("providers", "max_bytes") },
-  saguin_provider_publish_commit_max_records: { provider: p => p.commit_max, breakdown: splitOf("providers", "commit_max") },
-  saguin_max_session_expiry_seconds:     { cur: b => b.max_session_expiry, fmt: "duration" },
+  saguin_store_bytes:                 { cur: sumOf("providers", "bytes"), fmt: "bytes" },
 
   // **The per-entity families: summed for a stat, split for a breakdown.**
   // The broker labels these by queue, channel, provider or bridge, and both
@@ -1780,42 +1779,64 @@ const METRIC_MAP = {
   // that only exists inside a helper's arguments is a name that check cannot
   // see, and an unchecked half of a two-language fact is how the two drifted
   // the first time.
-  saguin_queue_inflight:           { hist: "queue_inflight", cur: sumOf("queues", "inflight"),        breakdown: splitOf("queues", "inflight") },
+  saguin_queue_workers:           { cur: sumOf("queues", "workers"), breakdown: splitOf("queues", "workers") },
   saguin_queue_delivered_total:    { cur: sumOf("queues", "delivered"),     breakdown: splitOf("queues", "delivered") },
   saguin_queue_acknowledged_total: { cur: sumOf("queues", "acknowledged"),  breakdown: splitOf("queues", "acknowledged") },
-  saguin_queue_redelivered_total:  { cur: sumOf("queues", "redelivered"),   breakdown: splitOf("queues", "redelivered") },
-  saguin_queue_returned_total:     { cur: sumOf("queues", "returned"),      breakdown: splitOf("queues", "returned") },
-  saguin_queue_expired_total:      { cur: sumOf("queues", "expired"),       breakdown: splitOf("queues", "expired") },
   saguin_queue_dead_lettered_total: { cur: sumOf("queues", "dead_lettered"), breakdown: splitOf("queues", "dead_lettered") },
-  saguin_queue_retain_ignored_total: { cur: sumOf("queues", "retain_ignored"), breakdown: splitOf("queues", "retain_ignored") },
 
   saguin_channel_records:          { cur: sumOf("channels", "records"),     breakdown: splitOf("channels", "records") },
   saguin_channel_bytes:            { cur: sumOf("channels", "bytes"), fmt: "bytes", breakdown: splitOf("channels", "bytes") },
   saguin_channel_consumers:        { cur: sumOf("channels", "consumers"),   breakdown: splitOf("channels", "consumers") },
-  saguin_channel_partitioned_consumers: { cur: sumOf("channels", "partitioned"), breakdown: splitOf("channels", "partitioned") },
-  saguin_channel_position_lost_total: { cur: sumOf("channels", "position_lost"), breakdown: splitOf("channels", "position_lost") },
   saguin_channel_retention_removed_total: { cur: sumOf("channels", "retention_removed"), breakdown: splitOf("channels", "retention_removed") },
-  saguin_latest_superseded_total:  { cur: sumOf("channels", "superseded"),  breakdown: splitOf("channels", "superseded") },
   // **Offsets are never summed.** One channel's next offset added to
   // another's is a number about no channel at all, so these three have a
   // split and no value - and the allow-list says `scalar: false`, so a stat
   // naming one is refused rather than drawn confidently wrong.
   saguin_channel_next_offset:      { breakdown: splitOf("channels", "next") },
   saguin_channel_floor_offset:     { breakdown: splitOf("channels", "floor") },
-  saguin_channel_consumer_position_min: { breakdown: splitOf("channels", "position_min") },
+  saguin_channel_position_min: { breakdown: splitOf("channels", "position_min") },
 
-  saguin_storage_commits_total:    { cur: sumOf("providers", "commits"),    breakdown: splitOf("providers", "commits") },
-  saguin_storage_committed_records_total: { cur: sumOf("providers", "records"), breakdown: splitOf("providers", "records") },
-  saguin_storage_errors_total:     { cur: sumOf("providers", "errors"),     breakdown: splitOf("providers", "errors") },
+  saguin_store_commits_total:    { cur: sumOf("providers", "commits"), breakdown: famSplit("saguin_store_commits_total", "closed_by") },
+  saguin_store_committed_records_total: { cur: sumOf("providers", "records") },
 
   saguin_bridge_received_total:    { cur: sumOf("bridges", "received"),     breakdown: splitOf("bridges", "received") },
   saguin_bridge_sent_total:        { cur: sumOf("bridges", "sent"),         breakdown: splitOf("bridges", "sent") },
-  saguin_bridge_loops_skipped_total: { cur: sumOf("bridges", "skipped"),    breakdown: splitOf("bridges", "skipped") },
   saguin_bridge_reconnects_total:  { cur: sumOf("bridges", "reconnects"),   breakdown: splitOf("bridges", "reconnects") },
   saguin_bridge_unsent_total:      { cur: sumOf("bridges", "unsent"),       breakdown: splitOf("bridges", "unsent") },
-  saguin_bridge_unstored_total:    { cur: sumOf("bridges", "unstored"),     breakdown: splitOf("bridges", "unstored") },
   saguin_bridge_connected:         { cur: sumOf("bridges", "connected"),    breakdown: splitOf("bridges", "connected") },
-  saguin_bridge_stopped:           { cur: sumOf("bridges", "stopped"),      breakdown: splitOf("bridges", "stopped") },
+
+  // **The 0.2.0 broker's other series**, read through the scrape's generic totals
+  // (families in /api/metrics): a stat sums a family, a breakdown splits it
+  // by its one label.
+  saguin_ready: { cur: famTotal("saguin_ready") },
+  saguin_goroutines: { cur: famTotal("saguin_goroutines"), breakdown: famSplit("saguin_goroutines", "role") },
+  saguin_log_lines_dropped_total: { cur: famTotal("saguin_log_lines_dropped_total"), breakdown: famSplit("saguin_log_lines_dropped_total", "cause") },
+  saguin_reloads_total: { cur: famTotal("saguin_reloads_total"), breakdown: famSplit("saguin_reloads_total", "part") },
+  saguin_operations_requests_total: { cur: famTotal("saguin_operations_requests_total"), breakdown: famSplit("saguin_operations_requests_total", "route") },
+  saguin_connections_open: { cur: famTotal("saguin_connections_open") },
+  saguin_disconnects_total: { cur: famTotal("saguin_disconnects_total"), breakdown: famSplit("saguin_disconnects_total", "reason") },
+  saguin_subscriptions_held: { cur: famTotal("saguin_subscriptions_held") },
+  saguin_wills_dropped_total: { cur: famTotal("saguin_wills_dropped_total"), breakdown: famSplit("saguin_wills_dropped_total", "cause") },
+  saguin_publish_throttled_seconds_total: { cur: famTotal("saguin_publish_throttled_seconds_total"), fmt: "duration" },
+  saguin_delivery_admission_gated: { cur: famTotal("saguin_delivery_admission_gated") },
+  saguin_delivery_admission_gated_seconds_total: { cur: famTotal("saguin_delivery_admission_gated_seconds_total"), fmt: "duration" },
+  saguin_requests_total: { cur: famTotal("saguin_requests_total"), breakdown: famSplit("saguin_requests_total", "request") },
+  saguin_inflight: { hist: "inflight", cur: famTotal("saguin_inflight") },
+  saguin_retained_bytes: { cur: famTotal("saguin_retained_bytes"), fmt: "bytes" },
+  saguin_queue_attempts_failed_total: { cur: famTotal("saguin_queue_attempts_failed_total"), breakdown: famSplit("saguin_queue_attempts_failed_total", "channel") },
+  saguin_queue_stale_responses_total: { cur: famTotal("saguin_queue_stale_responses_total"), breakdown: famSplit("saguin_queue_stale_responses_total", "channel") },
+  saguin_store_wal_bytes: { cur: famTotal("saguin_store_wal_bytes"), fmt: "bytes" },
+  saguin_store_full: { cur: famTotal("saguin_store_full") },
+  saguin_store_no_credit_seconds_total: { cur: famTotal("saguin_store_no_credit_seconds_total"), fmt: "duration" },
+  saguin_snapshots_total: { cur: famTotal("saguin_snapshots_total"), breakdown: famSplit("saguin_snapshots_total", "result") },
+  saguin_snapshot_last_success_timestamp_seconds: { cur: famTotal("saguin_snapshot_last_success_timestamp_seconds") },
+  saguin_snapshot_last_duration_seconds: { cur: famTotal("saguin_snapshot_last_duration_seconds"), fmt: "duration" },
+  saguin_memory_in_transit_bytes: { cur: famTotal("saguin_memory_in_transit_bytes"), fmt: "bytes" },
+  saguin_memory_max_bytes: { cur: famTotal("saguin_memory_max_bytes"), fmt: "bytes" },
+  saguin_memory_full_seconds_total: { cur: famTotal("saguin_memory_full_seconds_total"), fmt: "duration" },
+  saguin_bridge_rule_up: { cur: famTotal("saguin_bridge_rule_up"), breakdown: famSplit("saguin_bridge_rule_up", "bridge") },
+  saguin_bridge_connection_attempts_total: { cur: famTotal("saguin_bridge_connection_attempts_total"), breakdown: famSplit("saguin_bridge_connection_attempts_total", "bridge") },
+
 };
 
 // Sensible width (of 12) and height when a card names none - so a dashboard
@@ -2155,45 +2176,31 @@ function WAlerts({ d }) {
 }
 function WChannels({ d }) {
   return html`<div class="card"><h3>Channels<${Info}
-      text=${saysOf(d, "saguin_channel_info", "saguin_channel_records", "saguin_channel_consumer_position_min")} /></h3>
-    <table class="ops"><thead><tr><th>channel</th><th>type</th><th>provider</th><th>holds</th>
-      <th>bytes</th><th>consumers</th><th>worst lag</th><th>removed</th><th>reads refused</th></tr></thead>
+      text=${saysOf(d, "saguin_channel_info", "saguin_channel_records", "saguin_channel_position_min")} /></h3>
+    <table class="ops"><thead><tr><th>channel</th><th>type</th><th>holds</th>
+      <th>bytes</th><th>consumers</th><th>worst lag</th><th>removed</th></tr></thead>
       <tbody>${(d.channels || []).map(c => html`<tr key=${c.name} class=${c.below_floor ? "behind" : ""}>
         <td class="mono">${c.name}</td>
         <td><span class=${"tag " + c.type}>${c.type}</span></td>
-        <td class="mono">${c.provider || "-"} ${c.provider_type && html`<span class="tag muted">${c.provider_type}</span>`}</td>
         <td>${c.records == null ? html`<span class="sub">-</span>` : fmt(c.records)}</td>
         <td>${c.bytes == null ? html`<span class="sub">-</span>` : bytes(c.bytes)}</td>
         <td>${fmt(c.consumers)}</td>
         <td>${c.lag == null ? html`<span class="sub">-</span>` : fmt(c.lag)}</td>
         <td>${fmt(c.retention_removed)}</td>
-        <td>${c.position_lost > 0 ? html`<span style=${{ color: "var(--critical)" }}>${fmt(c.position_lost)}</span>` : fmt(c.position_lost)}</td>
       </tr>`)}</tbody></table></div>`;
-}
-function WStorage({ d }) {
-  return html`<div class="card"><h3>Storage<${Info}
-      text=${saysOf(d, "saguin_provider_info", "saguin_storage_commits_total", "saguin_storage_errors_total")} /></h3>
-    ${(d.providers || []).length === 0 ? html`<div class="empty">None configured.</div>`
-      : d.providers.map(p => html`<div key=${p.name} style=${{ marginBottom: "14px" }}>
-      <${Meter} value=${p.bytes} max=${p.max_bytes} label=${`${p.name} · ${p.type}`} />
-      ${p.commits > 0 && html`<p class="why" style=${{ marginTop: "6px", marginBottom: 0 }}>
-        ${fmt(p.records / p.commits)} records per commit, against a ceiling of ${fmt(p.commit_max)}.</p>`}
-      ${p.errors > 0 && html`<p class="why" style=${{ color: "var(--critical)" }}>${fmt(p.errors)} storage calls have failed.</p>`}
-    </div>`)}</div>`;
 }
 function WBridges({ d }) {
   return html`<div class="card"><h3>Bridges<${Info}
       text=${saysOf(d, "saguin_bridge_info", "saguin_bridge_connected", "saguin_bridge_received_total")} /></h3>
     ${(d.bridges || []).length === 0 ? html`<div class="empty">None configured.</div>`
       : html`<table class="ops"><thead><tr><th>bridge</th><th>peer</th><th>state</th>
-          <th>in</th><th>out</th><th>skipped</th><th>reconnects</th></tr></thead>
+          <th>in</th><th>out</th><th>reconnects</th></tr></thead>
         <tbody>${d.bridges.map(br => html`<tr key=${br.name}><td class="mono">${br.name}</td>
           <td class="mono sub">${br.peer}</td>
-          <td>${br.stopped ? html`<span style=${{ color: "var(--critical)" }}>halted</span>`
-            : br.connected ? html`<span style=${{ color: "var(--good)" }}>connected</span>`
+          <td>${br.connected ? html`<span style=${{ color: "var(--good)" }}>connected</span>`
             : html`<span style=${{ color: "var(--warning)" }}>link down</span>`}</td>
           <td>${fmt(br.received)}</td><td>${fmt(br.sent)}</td>
-          <td>${fmt(br.skipped)}</td><td>${fmt(br.reconnects)}</td></tr>`)}</tbody></table>`}</div>`;
+          <td>${fmt(br.reconnects)}</td></tr>`)}</tbody></table>`}</div>`;
 }
 function WQueues({ d }) {
   if ((d.queues || []).length === 0) return null;
@@ -2204,10 +2211,20 @@ function WQueues({ d }) {
       <${Tile} k="Out with a worker" v=${fmt(q.inflight)} /></div>
     <${Stacked} segments=${[
       { label: "acknowledged", value: q.acknowledged, color: "var(--series-3)" },
-      { label: "returned", value: q.returned, color: "var(--series-4)" },
-      { label: "redelivered", value: q.redelivered, color: "var(--series-2)" },
       { label: "dead-lettered", value: q.dead_lettered, color: "var(--series-1)" }]} />
   </div>`)}`;
+}
+function WStorage({ d }) {
+  return html`<div class="card"><h3>Store<${Info}
+      text=${saysOf(d, "saguin_store_info", "saguin_store_bytes", "saguin_store_commits_total")} /></h3>
+    ${(d.providers || []).map(p => html`<div key=${p.name} style=${{ marginBottom: "14px" }}>
+      <div class="tiles" style=${{ gridTemplateColumns: "1fr 1fr" }}>
+        <${Tile} k=${`Database · ${p.type} mode`} v=${p.bytes == null ? "-" : bytes(p.bytes)} />
+        <${Tile} k="Log" v=${p.wal_bytes == null ? "-" : bytes(p.wal_bytes)} /></div>
+      ${p.commits > 0 && html`<p class="why" style=${{ marginTop: "6px", marginBottom: 0 }}>
+        ${fmt(p.records / p.commits)} records per commit.</p>`}
+      ${p.full > 0 && html`<p class="why" style=${{ color: "var(--critical)" }}>The disk is full: the store is refusing writes.</p>`}
+    </div>`)}</div>`;
 }
 const WIDGETS = { channels: WChannels, storage: WStorage, bridges: WBridges,
                   queues: WQueues, alerts: WAlerts };
@@ -2513,33 +2530,26 @@ function Dashboard() {
         <${Tile} k="Uptime" v=${duration(b.uptime)}
                  help=${says("saguin_uptime_seconds")} />
         <${Tile} k="Published" v=${fmt(hist.length ? hist[hist.length - 1].published : null)}
-                 series=${series("published")} help=${says("saguin_published_total")} />
+                 series=${series("published")} help=${says("saguin_records_stored_total")} />
         <${Tile} k="Publishes refused" v=${fmt(totalRefused)} alarm=${totalRefused > 0}
                  help=${says("saguin_publish_refused_total")} />
-        <${Tile} k="Broadcast to nobody" u="unmatched" v=${fmt(b.unmatched)}
-                 alarm=${b.unmatched > 0} help=${says("saguin_broadcast_unmatched_total")} />
-        <${Tile} k="Deliveries dropped" v=${fmt(b.dropped)} alarm=${b.dropped > 0}
-                 u="the subscriber's queue was full"
-                 help=${says("saguin_deliveries_dropped_total")} />
-        <${Tile} k="Deliveries refused" v=${fmt(b.deliveries_refused)}
-                 u="its window was full" alarm=${b.deliveries_refused > 0}
-                 help=${says("saguin_deliveries_refused_total")} />
-        <${Tile} k="Sessions offline" v=${fmt(b.sessions_offline)}
-                 u="held, nothing connected"
-                 help=${says("saguin_sessions_offline")} />
-        <${Tile} k="Retained messages" v=${fmt(b.retained)}
-                 u=${b.retained == null ? "no retained store" : "on broadcast topics"}
-                 help=${says("saguin_retained_messages")} />
+        <${Tile} k="Records missed" v=${fmt(b.dropped)} alarm=${b.dropped > 0}
+                 u="a consumer never received them"
+                 help=${says("saguin_missed_total")} />
+        <${Tile} k="Sessions away" v=${fmt(b.sessions_offline)}
+                 u="kept, nothing connected"
+                 help=${says("saguin_sessions_away")} />
+        <${Tile} k="Retained values" v=${fmt(b.retained)}
+                 u="on broadcast topics"
+                 help=${says("saguin_retained_values")} />
         <${Tile} k="Connections accepted" v=${fmt(b.connections_total)}
-                 help=${says("saguin_connections_total")} />
+                 help=${says("saguin_connections_accepted_total")} />
         <${Tile} k="Deliveries expired" v=${fmt(b.expired)}
                  u="the publisher's own instruction"
                  help=${says("saguin_deliveries_expired_total")} />
-        <${Tile} k="Sessions shortened" v=${fmt(b.session_expiry_shortened)}
-                 u=${"cap " + duration(b.max_session_expiry)}
+        <${Tile} k="Session expiry capped" v=${fmt(b.session_expiry_shortened)}
                  alarm=${b.session_expiry_shortened > 0}
-                 help=${says("saguin_session_expiry_shortened_total",
-                             "saguin_max_session_expiry_seconds")} />
+                 help=${says("saguin_session_expiry_capped_total")} />
       </div>
 
       <div class="grid2">
@@ -2570,7 +2580,7 @@ function Dashboard() {
                          fills in one scrape later than the levels above.`} />
         </div>
         <div class="card">
-          <h3>Deliveries leaving<${Info} text=${says("saguin_deliveries_sent_total")} /></h3>
+          <h3>Deliveries leaving<${Info} text=${says("saguin_deliveries_total")} /></h3>
           <${TimeLine} points=${rate("deliveries_out")} color="var(--series-2)"
                        format=${msgsPerSecond}
                        label=${"now " + now(rate("deliveries_out"), msgsPerSecond)}
@@ -2598,11 +2608,11 @@ function Dashboard() {
 
       <div class="grid2">
         <div class="card">
-          <h3>Publishes over time<${Info} text=${says("saguin_published_total")} /></h3>
+          <h3>Publishes over time<${Info} text=${says("saguin_records_stored_total")} /></h3>
           <${TimeLine} points=${series("published")} label="cumulative, all channels" />
         </div>
         <div class="card">
-          <h3>Unresolved queue work<${Info} text=${says("saguin_queue_depth")} /></h3>
+          <h3>Unresolved queue work<${Info} text=${says("saguin_queue_jobs")} /></h3>
           <${TimeLine} points=${series("queue_depth")} label="across every queue"
                        color="var(--series-2)" />
         </div>
@@ -2610,7 +2620,7 @@ function Dashboard() {
 
       ${(d.protocols || []).length > 0 && html`
         <div class="card">
-          <h3>Which protocol the fleet connects with<${Info} text=${says("saguin_connections_by_protocol")} /></h3>
+          <h3>Which protocol the fleet connects with<${Info} text=${says("saguin_connections")} /></h3>
           <p class="why">
             Counted from the client table at each scrape rather than kept by
             increments - a gauge maintained on connect and disconnect is a
@@ -2679,24 +2689,20 @@ function Dashboard() {
         </div>`}
 
       <div class="card">
-        <h3>Channels<${Info} text=${says("saguin_channel_info", "saguin_channel_records", "saguin_queue_depth", "saguin_channel_consumer_position_min")} /></h3>
+        <h3>Channels<${Info} text=${says("saguin_channel_info", "saguin_channel_records", "saguin_queue_jobs", "saguin_channel_position_min")} /></h3>
         <table class="ops">
-          <thead><tr><th>channel</th><th>type</th><th>provider</th><th>holds</th><th>bytes</th>
+          <thead><tr><th>channel</th><th>type</th><th>holds</th><th>bytes</th>
             <th>consumers</th><th>worst lag</th><th>removed</th>
-            <th>reads refused</th></tr></thead>
+            </tr></thead>
           <tbody>
             ${d.channels.map(c => html`
               <tr key=${c.name} class=${c.below_floor ? "behind" : ""}>
                 <td class="mono">${c.name}</td>
                 <td><span class=${"tag " + c.type}>${c.type}</span></td>
-                <td class="mono">${c.provider || html`<span class="sub">-</span>`}${" "}${
-                  c.provider_type && html`<span class="tag muted"
-                    title="the kind of store this provider is. A memory provider holds what it holds until the broker stops; a sqlite one survives a restart."
-                  >${c.provider_type}</span>`}</td>
                 <td>${c.records == null
                   ? html`<span class="sub">not counted</span>`
                   : html`<span title=${c.type === "queue"
-                      ? "unresolved work, from saguin_queue_depth - a queue publishes no record count, because resolution removes from the middle rather than the front"
+                      ? "unresolved work, from saguin_queue_jobs - a queue publishes no record count, because resolution removes from the middle rather than the front"
                       : "records held, as the next offset minus the retention floor"}
                     >${fmt(c.records)}</span>`}${
                   c.type === "queue" && c.records != null
@@ -2705,11 +2711,6 @@ function Dashboard() {
                 <td>${fmt(c.consumers)}</td>
                 <td>${c.lag == null ? html`<span class="sub">-</span>` : fmt(c.lag)}</td>
                 <td>${fmt(c.retention_removed)}</td>
-                <td>${c.position_lost > 0
-                  ? html`<span style=${{ color: "var(--critical)" }}
-                          title="reads refused for being below the retention floor - invariant 1 firing"
-                        >${fmt(c.position_lost)}</span>`
-                  : fmt(c.position_lost)}</td>
               </tr>`)}
           </tbody>
         </table>
@@ -2732,7 +2733,7 @@ function Dashboard() {
           ${d.queues.map(q => html`
             <div class="card" key=${q.name}>
               <h3>Queue <span class="mono">${q.name}</span>
-                <${Info} text=${says("saguin_queue_depth", "saguin_queue_inflight",
+                <${Info} text=${says("saguin_queue_jobs", "saguin_queue_workers",
                                      "saguin_queue_dead_lettered_total")} /></h3>
               <div class="tiles" style=${{ gridTemplateColumns: "1fr 1fr" }}>
                 <${Tile} k="Unresolved" v=${fmt(q.depth)} />
@@ -2740,8 +2741,6 @@ function Dashboard() {
               </div>
               <${Stacked} segments=${[
                 { label: "acknowledged", value: q.acknowledged, color: "var(--series-3)" },
-                { label: "returned", value: q.returned, color: "var(--series-4)" },
-                { label: "redelivered", value: q.redelivered, color: "var(--series-2)" },
                 { label: "dead-lettered", value: q.dead_lettered, color: "var(--series-1)" },
               ]} />
               <p class="why" style=${{ marginTop: "10px", marginBottom: 0 }}>
@@ -2756,24 +2755,20 @@ function Dashboard() {
 
       <div class="grid2">
         <div class="card">
-          <h3>Storage<${Info} text=${says("saguin_provider_info", "saguin_storage_commits_total", "saguin_storage_errors_total")} /></h3>
+          <h3>Store<${Info} text=${says("saguin_store_info", "saguin_store_bytes", "saguin_store_commits_total")} /></h3>
           ${d.providers.map(p => html`
             <div key=${p.name} style=${{ marginBottom: "14px" }}>
-              <${Meter} value=${p.bytes} max=${p.max_bytes}
-                        label=${`${p.name} · ${p.type}`} />
-              ${p.type === "memory" && html`
-                <p class="why" style=${{ marginTop: "6px", marginBottom: 0 }}>
-                  Memory-backed: as durable as the next clean shutdown.
-                </p>`}
+              <div class="tiles" style=${{ gridTemplateColumns: "1fr 1fr" }}>
+                <${Tile} k=${`Database · ${p.type} mode`} v=${p.bytes == null ? "-" : bytes(p.bytes)} />
+                <${Tile} k="Log" v=${p.wal_bytes == null ? "-" : bytes(p.wal_bytes)} />
+              </div>
               ${p.commits > 0 && html`
                 <p class="why" style=${{ marginTop: "6px", marginBottom: 0 }}>
-                  ${fmt(p.records / p.commits)} records per commit, against a
-                  ceiling of ${fmt(p.commit_max)}. A batch near one under a
-                  ceiling of hundreds is slower than not collecting at all.
+                  ${fmt(p.records / p.commits)} records per commit.
                 </p>`}
-              ${p.errors > 0 && html`
+              ${p.full > 0 && html`
                 <p class="why" style=${{ color: "var(--critical)" }}>
-                  ${fmt(p.errors)} storage calls have failed.</p>`}
+                  The disk is full: the store is refusing writes.</p>`}
             </div>`)}
         </div>
         <div class="card">
@@ -2782,19 +2777,16 @@ function Dashboard() {
             ? html`<div class="empty">None configured.</div>`
             : html`<table class="ops">
                 <thead><tr><th>bridge</th><th>peer</th><th>state</th>
-                  <th>in</th><th>out</th><th>skipped</th><th>reconnects</th></tr></thead>
+                  <th>in</th><th>out</th><th>reconnects</th></tr></thead>
                 <tbody>${d.bridges.map(br => html`
                   <tr key=${br.name}>
                     <td class="mono">${br.name}</td>
                     <td class="mono sub">${br.peer}</td>
-                    <td>${br.stopped
-                      ? html`<span style=${{ color: "var(--critical)" }}>halted itself</span>`
-                      : br.connected
+                    <td>${br.connected
                       ? html`<span style=${{ color: "var(--good)" }}>connected</span>`
                       : html`<span style=${{ color: "var(--warning)" }}>link down</span>`}</td>
                     <td>${fmt(br.received)}</td>
                     <td>${fmt(br.sent)}</td>
-                    <td>${fmt(br.skipped)}</td>
                     <td>${fmt(br.reconnects)}</td>
                   </tr>`)}</tbody>
               </table>`}
@@ -2818,8 +2810,8 @@ function useRoute(path, deps) {
     setD(null);
     if (!path) return () => { live = false; };
     // **Fetched when the panel is opened, never on a timer.** These routes
-    // answer with a list rather than a number, and RFC 0005 says outright
-    // they must not be scraped: a client id is a string a client chose, so
+    // answer with a list rather than a number, and no metric carries them: a
+    // client id is a string a client chose, so
     // a series keyed by one is a series count chosen by whoever connects.
     api(path).then(r => live && r.body && setD(r.body));
     return () => { live = false; };
@@ -2876,9 +2868,7 @@ function RouteLookup() {
                 <span class="tag broadcast">no channel</span></h3>
               <p class="why">No channel's filter matches it, so it is delivered
                 live to whoever is subscribed at that moment and stored nowhere.
-                <b>That is also what a mistyped topic looks like</b> - the
-                broker counts these in${" "}
-                <code>saguin_broadcast_unmatched_total</code>.</p>`}
+                <b>That is also what a mistyped topic looks like.</b></p>`}
           ${(d.matched || []).length > 1 && html`
             <table class="ops">
               <thead><tr><th>filter</th><th>channel</th><th>type</th><th></th></tr></thead>
@@ -3520,7 +3510,7 @@ function Retained({ onOpen }) {
 // bug is fixed. This lists the records with their `saguin-dlq-*` reasons
 // surfaced, and requeues one at a time.
 //
-// **One record per click, and no drain-all.** RFC 0003 names the hazard:
+// **One record per click, and no drain-all.** The hazard:
 // redriving into a queue whose bug is not fixed dead-letters the job again,
 // and doing it in a loop fills a disk. One at a time makes that self-limiting.
 //

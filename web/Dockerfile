@@ -49,7 +49,7 @@ COPY web/app.py ./app.py
 COPY web/saguin-viewer.yaml ./saguin-viewer.yaml
 COPY web/static ./static
 # **The dashboards, and this line is why the image did not start.** The
-# configuration above names seven dashboard files, and a dashboard file that is
+# configuration above names nine dashboard files, and a dashboard file that is
 # not there stops the viewer at startup - deliberately, so a bad card is a
 # refusal rather than a blank tab. They arrived the day after this file was
 # last edited and nobody extended it, so every run of the image exited on
