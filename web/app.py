@@ -46,6 +46,7 @@ import binascii
 import collections
 import hashlib
 import io
+import itertools
 import ipaddress
 import json
 import math
@@ -76,6 +77,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from paho.mqtt.enums import CallbackAPIVersion
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
+from paho.mqtt.subscribeoptions import SubscribeOptions
 
 # **One file, and any value in it may name an environment variable.**
 #
@@ -1836,6 +1838,25 @@ def exactness(filt, i):
     return {"#": 1, "+": 2}.get(levels[i], 3)
 
 
+# **The broker lists broadcast as a channel too.** 0.2.0 publishes
+# `saguin_channel_info{channel="$broadcast",type="append",filter="#"}`
+# (metrics.md), so the table read from the catalogue has a row whose filter
+# claims every topic, and `channel_of` names `$broadcast` for any topic no
+# other channel spells out more exactly. That row is kept - it is what puts
+# broadcast's history in the tree and gives it a Seek - but a topic it holds
+# is still a broadcast topic, the only kind that has an MQTT retained value.
+# Testing `channel_of(...) is None` for that answered no for every topic on a
+# real broker: the retained panel stayed empty and its badge said 0 while
+# the broker held 22.
+BROADCAST = "$broadcast"
+
+
+def is_broadcast(ch):
+    """Whether the channel `channel_of` named is broadcast: none at all, or
+    the broker's own `$broadcast`."""
+    return ch is None or ch == BROADCAST
+
+
 def channel_of(topic, chans=None):
     """The channel a topic belongs to, or None for broadcast.
 
@@ -2058,9 +2079,13 @@ def on_connect(client, _userdata, _flags, reason_code, _properties=None):
     # what makes it so. Measured against a running saguin: `#` is granted at
     # QoS 1 and serves the append and latest channels, replays the append
     # ones from their retention floor, serves topics no channel claims -
-    # and does not serve a queue's records. A filter merely crossing a queue
-    # is an ordinary subscriber and the queue's work is left out, so this
-    # viewer cannot take a job even by asking for everything. Nothing under
+    # and over a queue's topics makes this viewer a *reader*, as on append
+    # (design.md, Channels: queue): it is replayed the queue's records from
+    # the floor and sees new ones, and takes none of them. Only a
+    # subscription to `$saguin/queue/<channel>` makes a worker, so this
+    # viewer cannot take a job even by asking for everything. (`saguin
+    # --route` labels a queue a filter reaches `excluded`, meaning excluded
+    # from the work, not from the records.) Nothing under
     # `$SYS/` or `$saguin/` reaches a wildcard either.
     #
     # **That measurement was taken against a broker with no acl_file**, and it
@@ -2070,8 +2095,22 @@ def on_connect(client, _userdata, _flags, reason_code, _properties=None):
     # is an ordinary acknowledgement rather than an error. The page then shows
     # a connected viewer holding nothing, and the honest reading of that is
     # impossible from the page. So every filter's answer is kept.
+    #
+    # **Retain As Published, on MQTT 5.** A delivery to a subscription that
+    # already exists carries RETAIN = 0 whatever the publisher asked for, so
+    # the page learned of a retained value only when one was replayed at
+    # connect: a retained publish made afterwards - by anybody, this page's
+    # own Publish form included - reached the tree untagged, the tag stayed
+    # on the replayed message, and the retained panel missed it until the
+    # next reconnect. With the option the flag arrives as published; saguin
+    # honours it on `$broadcast`, the only place a retained value exists
+    # (design.md, SUBSCRIBE).
     for filt in expand(MQTT_CFG["subscribe"]):
-        _res, mid = client.subscribe(filt, qos=1)
+        if PROTOCOL == mqtt.MQTTv5:
+            _res, mid = client.subscribe(
+                filt, options=SubscribeOptions(qos=1, retainAsPublished=True))
+        else:
+            _res, mid = client.subscribe(filt, qos=1)
         with lock:
             _sub_mids[mid] = filt
 
@@ -2186,7 +2225,7 @@ def on_message(_client, _userdata, msg):
     with lock:
         chans = dict(channels)
     ch = channel_of(msg.topic, chans)
-    kind = chans.get(ch, ("broadcast", ""))[0]
+    kind = "broadcast" if is_broadcast(ch) else chans.get(ch, ("broadcast", ""))[0]
     entry["payload"] = render_payload(
         msg.payload,
         getattr(getattr(msg, "properties", None), "ContentType", "") or "", kind)
@@ -2272,7 +2311,7 @@ def on_message(_client, _userdata, msg):
         # sets the flag on the current values a subscription starts with
         # (design.md, SUBSCRIBE, Options), which are the channel's state, not
         # retained values, so only a topic no channel claims is recorded.
-        if msg.retain and not ch:
+        if msg.retain and is_broadcast(ch):
             if msg.payload:
                 retained[msg.topic] = {"topic": msg.topic, "at": entry["at"],
                                        "payload": entry["payload"], "qos": entry["qos"]}
@@ -2441,7 +2480,10 @@ def api_state():
                  # `tail` where the channel says so, and absent where it
                  # starts from the retention floor, which is the default.
                  "start": starts.get(n),
-                 "seekable": k == "append",
+                 # `$broadcast` is append but not seekable: the broker's seek
+                 # topic names configured channels only, and refuses
+                 # `$saguin/consumer/$broadcast/seek` with 0x90.
+                 "seekable": k == "append" and n != BROADCAST,
                  # The broker's own count, so this page and the dashboard
                  # are quoting one number rather than two.
                  "held": holds.get(n),
@@ -2476,8 +2518,10 @@ def api_tree():
             {"topic": name, "count": t["count"], "last": t["last"],
              "channel": t["channel"], "kind": t["kind"],
              "offset": (t["messages"][0]["offset"] if t["messages"] else None),
-             "retained": (t["kind"] != "latest"
-                          and bool(t["messages"] and t["messages"][0]["retained"]))}
+             # Whether the topic holds a retained value now, from the
+             # retained set - not the newest arrival's flag, which a later
+             # plain publish clears while the value stays.
+             "retained": t["kind"] != "latest" and name in retained}
             for name, t in sorted(topics.items())
         ])
 
@@ -2768,8 +2812,14 @@ def api_retained():
     # and the page can say which number is which.
     with lock:
         seen = {t: v["count"] for t, v in topics.items()}
-    out = [{**it, "channel": "broadcast", "seen": seen.get(it["topic"], 0)}
-           for it in items if channel_of(it["topic"], chans) is None]
+    # The channel is the one the tree files the topic under - `$broadcast` on
+    # 0.2.0, nothing on a broker whose catalogue has no such row - so opening
+    # a row lands on the tree's own node rather than on a path it never built.
+    out = []
+    for it in items:
+        ch = channel_of(it["topic"], chans)
+        if is_broadcast(ch):
+            out.append({**it, "channel": ch, "seen": seen.get(it["topic"], 0)})
     return jsonify({"items": out})
 
 
@@ -2960,6 +3010,21 @@ def api_messages():
                             "matched": 0, "q": q})
         held = list(t["messages"])
         kind, channel, count = t["kind"], t["channel"], t["count"]
+        holds_value = topic in retained
+    # **The tag goes on the retained value, not on every retained publish.**
+    # A topic has one retained slot: of the messages published with RETAIN,
+    # the newest is the value and the older ones were replaced by it, and
+    # after an empty retained publish none of them is. So on broadcast the
+    # tag marks that one message, and moves when a newer retained publish
+    # arrives. A `latest` channel's flag is its current value and is left as
+    # it came.
+    if is_broadcast(channel):
+        marked, current = [], holds_value
+        for m in held:
+            now = bool(current and m.get("retained"))
+            current = current and not now
+            marked.append(m if bool(m.get("retained")) == now else {**m, "retained": now})
+        held = marked
     shown = [m for m in held if q in haystack(m, decode)] if q else held
     # **The cap travels with the answer**, so the page can say that a full
     # list is a window rather than the topic's whole history. A reader
@@ -3413,7 +3478,10 @@ def api_route():
         # Every filter that matches, so an operator can see that two claim it
         # and which one won - the only way an overlap is visible at all.
         "matched": matched,
-        "readable": (chans.get(holder, ("", ""))[0] != "queue") if holder else True,
+        # A queue's topics are read as on append: a subscription to them is a
+        # reader (design.md, Channels: queue). Only taking a job needs the
+        # worker topic.
+        "readable": True,
     })
 
 
@@ -3594,7 +3662,7 @@ def counts():
     return {
         "deadletters": sum(len(t["messages"]) for t in topics.values()
                            if t.get("channel") in dlqs),
-        "retained": sum(1 for t in retained if channel_of(t, chans) is None),
+        "retained": sum(1 for t in retained if is_broadcast(channel_of(t, chans))),
     }
 
 
@@ -3828,10 +3896,12 @@ def api_publish():
     # What it knows is what it asked for. An empty payload is the delete, so
     # that removes the row rather than adding one.
     #
-    # **The limit, said rather than hidden**: a retained value published by
-    # somebody else still appears only after this viewer reconnects and is
+    # On MQTT 5 the subscription asks for Retain As Published, so a retained
+    # value published by somebody else arrives flagged and is recorded as it
+    # arrives. **On 3.1.1, the limit, said rather than hidden**: one published
+    # by somebody else appears only after this viewer reconnects and is
     # served the store. Nothing on the wire distinguishes it before then.
-    if resp.get("ok") and body.get("retain") and channel_of(topic) is None:
+    if resp.get("ok") and body.get("retain") and is_broadcast(channel_of(topic)):
         with lock:
             if payload:
                 retained[topic] = {"topic": topic, "at": time.time(), "qos": qos,
@@ -3875,7 +3945,7 @@ def api_keep():
                 # preference - resizing it would show a history the broker
                 # does not have.
                 continue
-            t["messages"] = collections.deque(t["messages"], maxlen=want)
+            t["messages"] = newest(t["messages"], want)
     return jsonify({"ok": True, "keep": want})
 
 
@@ -4073,6 +4143,39 @@ def api_requeue():
     })
 
 
+def newest(messages, depth):
+    """A ring of the `depth` newest of `messages`, which are newest first.
+
+    **`deque(messages, maxlen=depth)` keeps the oldest.** A ring is filled with
+    `appendleft`, so its newest record is on the left; built from an iterable,
+    a bounded deque appends on the right and drops from the left once full -
+    the newest end. Asking `keep` for fewer than were held kept the oldest
+    and threw away the newest, the reverse of what the bound means.
+    """
+    return collections.deque(itertools.islice(messages, depth), maxlen=depth)
+
+
+def restore_topics(held):
+    """Put back the topics a seek set aside, when the broker refused it.
+
+    A refused seek moves nothing and replays nothing (design.md, `$saguin`
+    topics), so whatever arrived on these topics while the answer was awaited
+    is genuinely new: it goes first, the held records after it, under the
+    ring's bound as it is now - `/api/keep` may have resized the rings in
+    between, and rebuilt every ring but these. Caller holds `lock`.
+    """
+    for name, old in held.items():
+        depth = 1 if old["kind"] == "latest" else PER_TOPIC
+        cur = topics.get(name)
+        if cur is None:
+            old["messages"] = newest(old["messages"], depth)
+            topics[name] = old
+            continue
+        cur["messages"] = newest(itertools.chain(cur["messages"], old["messages"]), depth)
+        cur["count"] += old["count"]
+        cur["last"] = max(cur["last"], old["last"])
+
+
 @app.post("/api/seek")
 def api_seek():
     """Move this viewer's own position on one append channel.
@@ -4085,6 +4188,14 @@ def api_seek():
     position = str(body.get("position", "")).strip()
     with lock:
         kind = channels.get(channel, (None, ""))[0]
+    if channel == BROADCAST:
+        # Asked anyway, the broker answers 0x90 "Topic name invalid", which
+        # names nothing the reader did wrong. A broadcast subscription starts
+        # at the retained values and the next message (design.md, SUBSCRIBE);
+        # its stored records serve a durable session's catch-up, not a seek.
+        return jsonify({"ok": False,
+                        "error": "$broadcast has no position to move: the broker seeks "
+                                 "configured append channels and queues only"}), 400
     if kind != "append":
         return jsonify({"ok": False,
                         "error": f"{channel!r} is {kind or 'not a channel'} here; only an "
@@ -4104,9 +4215,19 @@ def api_seek():
     # including channels the seek could not touch - so a replay of one
     # channel looked like it had emptied the others. Nothing here changes
     # what the broker holds.
+    #
+    # **Set aside rather than deleted, until the broker has answered.** They
+    # were deleted before the seek was sent, and a refused seek - beyond-end,
+    # below-floor, no permission - replays nothing, so the channel stayed
+    # empty on the page until the viewer reconnected. They leave the tree now,
+    # as before, so a replay lands on an empty channel rather than among the
+    # records it repeats; the PUBACK then decides: 0x00 means the position has
+    # moved (design.md: an accepted request's acknowledgement is ready once
+    # its change has committed) and they are dropped, a refusal puts them back.
+    # The same objects, moved rather than copied, and held for one round trip.
     with lock:
-        for name in [n for n, t in topics.items() if t["channel"] == channel]:
-            del topics[name]
+        held = {name: topics.pop(name) for name in
+                [n for n, t in topics.items() if t["channel"] == channel]}
 
     info = client.publish(f"$saguin/consumer/{channel}/seek", position.encode(),
                           qos=1, properties=props)
@@ -4127,9 +4248,28 @@ def api_seek():
     try:
         info.wait_for_publish(timeout=5)
     except Exception as e:                     # noqa: BLE001 - shown, not hidden
+        # Never reached the broker, so nothing moved: the page keeps its records.
+        with lock:
+            restore_topics(held)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
+    # paho records the PUBACK's code (`on_publish`) before it marks the
+    # publish done, so a PUBACK that has arrived is readable here. Read, not
+    # taken: `await_reply` below takes it.
+    with lock:
+        rc = pubacks.get(info.mid)
+    if rc is not None:
+        with lock:
+            if int(getattr(rc, "value", rc)) >= 0x80:
+                restore_topics(held)
+        held = {}
+
     reply, refused, said = await_reply(info, ticket)
+    if refused is not None and held:
+        # A refusal that came after wait_for_publish gave up: still a refusal.
+        with lock:
+            restore_topics(held)
+    held = {}
     with lock:
         floor = seek_props.pop(ticket, {}).get("saguin-floor")
     if reply is not None:
@@ -4154,8 +4294,15 @@ def api_seek():
                       f"{MQTT_CFG['username'] or '<user>'}`")
         return jsonify({"ok": False, "channel": channel, "position": position,
                         "error": error}), 403 if code == 0x87 else 502
+    # **No answer at all leaves the channel cleared**, as before: the seek may
+    # still be applied and its replay still on the way, and records put back
+    # now would sit beside their own replay, each shown twice.
     return jsonify({"ok": False, "channel": channel, "position": position,
-                    "error": "no reply within 5s"}), 504
+                    "error": "no reply within 5s"
+                             + ("" if info.is_published() else
+                                " - and no acknowledgement either, so whether the broker "
+                                "moved the position is unknown; this page has cleared "
+                                f"{channel}'s records in case a replay is coming")}), 504
 
 
 @app.get("/api/sessions")

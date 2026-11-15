@@ -63,6 +63,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* **Every link takes the theme's accent.** Only `a.brand` and `a.topicname`
+   were styled, so any other link - a retained row's topic, a docs link - kept
+   the browser's own #0000EE (purple once visited), which on the dark theme is
+   close to invisible. Visited is not told apart: these are controls on one
+   page rather than places read once. A classed link's own rule still wins. */
+a, a:visited { color: var(--accent); }
+a:hover { text-decoration: underline; }
+
 code, .mono { font-family: var(--mono); font-size: 0.92em; }
 
 /* The resolved configuration, coloured by role rather than left as one
@@ -175,6 +183,35 @@ main {
   font-family: inherit; cursor: pointer; text-align: left;
 }
 .sectionfold:hover { color: var(--dim); }
+
+/* The Operations row also carries the button that puts the whole left panel
+   away (a phone's whole width for the topic), and the topic pane carries the
+   one that brings it back. */
+.treehead { display: flex; align-items: flex-start; }
+.treehead .sectionfold { flex: 1; min-width: 0; }
+.treehide, .treeshow {
+  flex: none; cursor: pointer; font: inherit; line-height: 1;
+  color: var(--dim); background: transparent;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+/* » and « are one pair, drawn alike: the same size, and the same place in
+   the page's top-left corner as the Operations row they sit beside. */
+/* A fixed whole-pixel box with the arrow centred in it. Sized by its glyph
+   the box came out 22.6px wide, and on a phone's dense screen a right border
+   on a fractional edge is drawn a hair thin or lost. */
+.treehide, .treeshow {
+  width: 24px; height: 22px; padding: 0 0 2px; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.treehide { margin-top: -3px; }
+.treehide:hover, .treeshow:hover { color: var(--accent); border-color: var(--accent); }
+main { position: relative; }
+.treeshow {
+  position: absolute; top: 9px; left: var(--s-2); z-index: 5;
+  background: var(--surface);
+}
+/* Room for the button, so it does not sit on the topic's heading. */
+main.treehidden .detail { padding-left: 56px; }
 .sectionfold .twist { padding-top: 1px; }
 /* How many are folded away, so the group does not read as empty. */
 .foldcount {
@@ -828,4 +865,22 @@ table.ops.undertheh { margin-top: 0; }
 .barvalue {
   flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--faint);
   min-width: 48px; text-align: right;
+}
+
+/* **A phone's header: one row, the tabs always in it.** The row is fixed at
+   --header-h and the panes below are sized from it, so it must not wrap;
+   what it sheds instead is what the page shows elsewhere or can do without
+   at that width - the title (the logo stays, and is still the way home),
+   the protocol and client id, the counts, and the connection pill's word
+   (its dot keeps the colour, its title the word). A pill raised for a
+   problem stays. */
+@media (max-width: 700px) {
+  header { gap: var(--s-2); padding: 0 var(--s-2); }
+  header h1, .pill-wide, .stats .stat { display: none; }
+  /* Out of sight, not out of the page: a screen reader still says it. */
+  .pill-conn .pilltext { position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .pill-conn { padding: 6px; gap: 0; }
+  .tabs { margin-left: 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs button { padding: 5px 8px; white-space: nowrap; }
 }

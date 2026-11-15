@@ -3755,6 +3755,17 @@ function App() {
     document.addEventListener("mouseup", up);
   }, []);
 
+  // **The whole left panel can be put away**, for a phone: the panel is a
+  // fixed column beside the topic, and on a narrow screen it leaves the topic
+  // a sliver. Remembered like its width. With nothing remembered a narrow
+  // screen starts with it away, since that is the screen it is for.
+  const [treeHidden, setTreeHiddenRaw] = useState(() => {
+    const kept = cookie("saguin_viewer_tree_hidden");
+    return kept === null ? window.innerWidth < 700 : kept === "1";
+  });
+  const setTreeHidden = v => { cookie("saguin_viewer_tree_hidden", v ? "1" : "0");
+                               setTreeHiddenRaw(v); };
+
   const [msgQ, setMsgQ] = useState(() => cookie("saguin_viewer_msg_filter") || "");
 
   useEffect(() => { cookie("saguin_viewer_msg_filter", msgQ); }, [msgQ]);
@@ -4091,10 +4102,12 @@ function App() {
         <h1>Sagüin Viewer</h1>
       </a>
       ${reachableNow
-        ? html`<span class="pill">
+        ? html`<span class="pill pill-conn"
+                     title=${(state.connected ? "connected" : "not connected")
+                             + (state.error ? " - " + state.error : "")}>
             <span class=${"dot " + (state.connected ? "up" : "down")}></span>
-            ${state.connected ? "connected" : "not connected"}
-            ${state.error ? " - " + state.error : ""}
+            <span class="pilltext">${state.connected ? "connected" : "not connected"}
+            ${state.error ? " - " + state.error : ""}</span>
           </span>`
         : html`<span class="pill" style=${{ color: "var(--bad)" }}
                      title="Nothing on this page is updating. Start the viewer again and it resumes on its own.">
@@ -4112,8 +4125,8 @@ function App() {
           <span class="dot down"></span>
           replies refused - answers will not arrive
         </span>`}
-      <span class="pill">MQTT ${mqttName(state.protocol || "5")}</span>
-      <span class="pill"><code>${state.client_id}</code></span>
+      <span class="pill pill-wide">MQTT ${mqttName(state.protocol || "5")}</span>
+      <span class="pill pill-wide"><code>${state.client_id}</code></span>
       ${(() => {
         // **A refused subscription, said from every tab.** The broker answers
         // a filter this credential may not read with a reason code in the
@@ -4159,8 +4172,18 @@ function App() {
           <${AlarmsView} log=${alarmLog} notify=${notify} notifyNote=${notifyNote}
                          toggleNotify=${toggleNotify} /></div>`
       : html`
-    <main style=${{ gridTemplateColumns: `${treeW}px 6px 1fr` }}>
-      <div class="tree">
+    <main class=${treeHidden ? "treehidden" : ""}
+          style=${{ gridTemplateColumns: treeHidden ? "1fr"
+                    // Never wider than the screen: a width dragged on a desktop
+                    // put the menu, and its hide button, past a phone's edge.
+                    : `min(${treeW}px, calc(100vw - 56px)) 6px minmax(0, 1fr)` }}>
+      ${treeHidden && html`
+        <button class="treeshow" title="Show the menu: operations, channels and topics"
+                aria-label="Show the menu" onClick=${() => setTreeHidden(false)}>»</button>`}
+      ${/* Hidden rather than unmounted, so the tree keeps its scroll, its
+            open branches and the filter box's text for when it comes back. */ ""}
+      <div class="tree" style=${treeHidden ? { display: "none" } : null}>
+        <div class="treehead">
         <button class="sectionlabel sectionfold"
                 aria-expanded=${opsOpen ? "true" : "false"}
                 title=${opsOpen ? "Fold the broker's own views away"
@@ -4170,6 +4193,9 @@ function App() {
           <span>Operations</span>
           ${!opsOpen && html`<span class="foldcount">${opsViews.length}</span>`}
         </button>
+        <button class="treehide" title="Hide this menu, giving the topic the whole width"
+                aria-label="Hide the menu" onClick=${() => setTreeHidden(true)}>«</button>
+        </div>
         ${opsOpen
           ? opsViews.map(([key, label, icon]) => sidebarButton(key, label, icon))
           : // **Folded, the one you are looking at stays.** Otherwise
@@ -4206,14 +4232,18 @@ function App() {
           : match
           ? html`<div class="empty">No topic matches <code>${treeFilter}</code>.</div>`
           : html`<div class="empty">Waiting for the first message…</div>`}
-        ${roots.length > 0 && !roots.includes("broadcast") && html`
+        ${/* 0.2.0 files broadcast under the broker's own `$broadcast`;
+              "broadcast" is this page's word when the catalogue has no such
+              row. */ ""}
+        ${roots.length > 0 && !roots.includes("broadcast") && !roots.includes("$broadcast") && html`
           <p class="why" style=${{ padding: "12px 8px 0", fontSize: "11px" }}>
-            No broadcast topics yet. A topic no channel claims is stored
-            nowhere, so none replays when this page connects - they appear here
-            as messages flow.
+            No broadcast topics yet. A new subscription to a topic no channel
+            claims is handed its retained values and nothing older, so the rest
+            appear here as messages flow.
           </p>`}
       </div>
       <div class="resizer" onMouseDown=${drag}
+           style=${treeHidden ? { display: "none" } : null}
            title="Drag to resize; the width is remembered"></div>
       <div class="detail">
         ${view === "feed"      ? html`<${Feed} showTopic=${showTopic} />`

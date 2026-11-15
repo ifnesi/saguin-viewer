@@ -2289,6 +2289,38 @@ class TheRetainedSet(unittest.TestCase):
                 app.channels.clear()
                 app.channels.update(saved)
 
+    def test_the_brokers_own_broadcast_row_does_not_hide_retained_values(self):
+        """0.2.0's catalogue carries `$broadcast` as an append channel with
+        filter `#` (metrics.md), so `channel_of` names it for every topic no
+        other channel claims. Those are broadcast topics all the same: a
+        retained value on one is recorded, listed, counted, and cleared by an
+        empty retained publish - and a `latest` channel's value still is not."""
+        with app.lock:
+            saved = dict(app.channels)
+            app.channels.clear()
+            app.channels.update({"$broadcast": ("append", "#"),
+                                 "state": ("latest", "probe/state/+")})
+        try:
+            self.assertEqual(app.channel_of("probe/ret/e"), "$broadcast")
+            self.deliver("probe/ret/e", b"kept", True)
+            self.deliver("probe/state/f", b"on", True)
+            self.assertIn("probe/ret/e", app.retained)
+            self.assertNotIn("probe/state/f", app.retained)
+
+            client = app.app.test_client()
+            listed = client.get("/api/retained").get_json()["items"]
+            self.assertEqual([it["topic"] for it in listed], ["probe/ret/e"])
+            # Filed under the channel the tree uses, so opening the row finds its node.
+            self.assertEqual(listed[0]["channel"], "$broadcast")
+            self.assertEqual(client.get("/api/state").get_json()["counts"]["retained"], 1)
+
+            self.deliver("probe/ret/e", b"", False)   # a clear, as a live subscriber sees it
+            self.assertNotIn("probe/ret/e", app.retained)
+        finally:
+            with app.lock:
+                app.channels.clear()
+                app.channels.update(saved)
+
 
 class TheAlarmRecord(unittest.TestCase):
     """Alarm episodes recorded by the poll thread: opened when a threshold
@@ -4249,3 +4281,255 @@ class ASeekBelowTheFloorSaysWhereTheChannelStarts(unittest.TestCase):
         self.assertEqual(body["floor"], "4211")
         self.assertIn("the oldest still held is offset 4211", body["error"])
         self.assertEqual(app.seek_props, {})
+
+
+class BroadcastIsNotSeekable(unittest.TestCase):
+    """0.2.0 lists `$broadcast` as an `append` channel (metrics.md), but the
+    broker's seek topic names configured channels only: a seek on it is
+    refused 0x90 "Topic name invalid". So the page offers no Seek there, and a
+    seek asked for anyway is answered here without reaching the broker."""
+
+    def setUp(self):
+        with app.lock:
+            self.saved = dict(app.channels)
+            app.channels.clear()
+            app.channels.update({"$broadcast": ("append", "#"),
+                                 "events": ("append", "iot/+/events")})
+
+    def tearDown(self):
+        with app.lock:
+            app.channels.clear(); app.channels.update(self.saved)
+
+    def test_the_state_marks_broadcast_unseekable(self):
+        chans = {c["name"]: c for c in app.app.test_client().get("/api/state").get_json()["channels"]}
+        self.assertFalse(chans["$broadcast"]["seekable"])
+        self.assertTrue(chans["events"]["seekable"])
+
+    def test_a_seek_on_broadcast_is_refused_without_publishing(self):
+        client = unittest.mock.MagicMock()
+        with unittest.mock.patch.object(app, "client", client):
+            r = app.app.test_client().post("/api/seek", json={"channel": "$broadcast", "position": "-1"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("no position to move", r.get_json()["error"])
+        client.publish.assert_not_called()
+
+
+class ARefusedSeekLeavesTheChannelAsItWas(unittest.TestCase):
+    """A seek sets the channel's topics aside rather than deleting them, and
+    the PUBACK decides: 0x00 means the position moved and the replay will
+    refill the tree, a refusal puts them back. A refused seek used to leave
+    the channel empty on the page until the viewer reconnected - the broker
+    had moved nothing and replayed nothing."""
+
+    class Info:
+        mid = 91
+
+        def __init__(self, published=True, fail=None):
+            self.published, self.fail = published, fail
+
+        def wait_for_publish(self, timeout=None):
+            if self.fail:
+                raise RuntimeError(self.fail)
+
+        def is_published(self):
+            return self.published
+
+    def ring(self, *payloads):
+        return collections.deque([{"payload": p} for p in payloads], maxlen=app.PER_TOPIC)
+
+    def setUp(self):
+        with app.lock:
+            self.saved = (dict(app.channels), dict(app.topics))
+            app.channels.clear()
+            app.channels.update({"fleet": ("append", "iot/fleet/+"),
+                                 "other": ("append", "iot/other/+")})
+            app.topics.clear()
+            app.topics["iot/fleet/a"] = {"count": 2, "last": 10.0, "channel": "fleet",
+                                         "kind": "append", "messages": self.ring("a2", "a1")}
+            app.topics["iot/fleet/b"] = {"count": 1, "last": 11.0, "channel": "fleet",
+                                         "kind": "append", "messages": self.ring("b1")}
+            app.topics["iot/other/x"] = {"count": 1, "last": 12.0, "channel": "other",
+                                         "kind": "append", "messages": self.ring("x1")}
+            app.pubacks.clear(); app.seeks.clear(); app.seek_props.clear()
+
+    def tearDown(self):
+        with app.lock:
+            app.channels.clear(); app.channels.update(self.saved[0])
+            app.topics.clear(); app.topics.update(self.saved[1])
+            app.pubacks.clear(); app.seeks.clear(); app.seek_props.clear()
+
+    def seek(self, on_publish, info=None):
+        test, info = self, info or self.Info()
+
+        class Client:
+            def publish(self, topic, payload, qos=0, properties=None):
+                # While the seek is in flight, the channel is off the page.
+                test.assertNotIn("iot/fleet/a", app.topics)
+                test.assertIn("iot/other/x", app.topics)
+                on_publish(properties.CorrelationData.decode())
+                return info
+
+        with unittest.mock.patch.object(app, "client", Client()), \
+                unittest.mock.patch.object(app, "PROTOCOL", app.mqtt.MQTTv5):
+            return app.app.test_client().post("/api/seek",
+                                              json={"channel": "fleet", "position": "999"})
+
+    def payloads(self, topic):
+        return [m["payload"] for m in app.topics[topic]["messages"]]
+
+    def test_a_refusal_puts_the_channel_back(self):
+        def refuse(ticket):
+            with app.lock:
+                app.pubacks[self.Info.mid] = 0x83
+                app.seeks[ticket] = "beyond-end"
+        r = self.seek(refuse)
+        self.assertEqual(r.get_json()["error"], "the broker refused it: beyond-end")
+        self.assertEqual(self.payloads("iot/fleet/a"), ["a2", "a1"])
+        self.assertEqual(app.topics["iot/fleet/a"]["count"], 2)
+        self.assertEqual(self.payloads("iot/fleet/b"), ["b1"])
+        self.assertEqual(self.payloads("iot/other/x"), ["x1"])
+
+    def test_what_arrived_during_a_refused_seek_is_kept_newest_first(self):
+        def refuse_after_a_live_message(ticket):
+            with app.lock:
+                app.topics["iot/fleet/a"] = {"count": 1, "last": 20.0, "channel": "fleet",
+                                             "kind": "append", "messages": self.ring("a3")}
+                app.pubacks[self.Info.mid] = 0x83
+                app.seeks[ticket] = "beyond-end"
+        self.seek(refuse_after_a_live_message)
+        self.assertEqual(self.payloads("iot/fleet/a"), ["a3", "a2", "a1"])
+        self.assertEqual(app.topics["iot/fleet/a"]["count"], 3)
+        self.assertEqual(app.topics["iot/fleet/a"]["last"], 20.0)
+
+    def test_an_accepted_seek_leaves_the_channel_to_its_replay(self):
+        def accept(ticket):
+            with app.lock:
+                app.pubacks[self.Info.mid] = 0
+                app.seeks[ticket] = "42"
+        r = self.seek(accept)
+        self.assertTrue(r.get_json()["ok"])
+        self.assertNotIn("iot/fleet/a", app.topics)
+        self.assertNotIn("iot/fleet/b", app.topics)
+        self.assertEqual(self.payloads("iot/other/x"), ["x1"])
+
+    def test_a_seek_that_never_left_puts_the_channel_back(self):
+        r = self.seek(lambda ticket: None, self.Info(fail="Message publish failed: not connected"))
+        self.assertEqual(r.status_code, 502)
+        self.assertEqual(self.payloads("iot/fleet/a"), ["a2", "a1"])
+
+    def test_no_answer_at_all_leaves_the_channel_cleared_and_says_so(self):
+        """The seek may still be applied, and its replay would then arrive
+        beside records put back - each shown twice."""
+        with unittest.mock.patch.object(app, "await_reply", return_value=(None, None, None)):
+            r = self.seek(lambda ticket: None, self.Info(published=False))
+        self.assertEqual(r.status_code, 504)
+        self.assertIn("cleared fleet's records", r.get_json()["error"])
+        self.assertNotIn("iot/fleet/a", app.topics)
+
+    def test_the_rings_come_back_at_the_bound_keep_set_meanwhile(self):
+        def shrink_then_refuse(ticket):
+            with app.lock:
+                app.pubacks[self.Info.mid] = 0x83
+        with unittest.mock.patch.object(app, "PER_TOPIC", 1):
+            self.seek(shrink_then_refuse)
+            self.assertEqual(self.payloads("iot/fleet/a"), ["a2"])
+
+
+class ShrinkingKeepDropsTheOldest(unittest.TestCase):
+    """A ring is newest first, so a smaller `keep` must keep its head. It kept
+    its tail: `deque(ring, maxlen=n)` drops from the newest end."""
+
+    def setUp(self):
+        with app.lock:
+            self.saved = (dict(app.topics), app.PER_TOPIC)
+            app.topics.clear()
+            ring = collections.deque(maxlen=500)
+            for i in range(1, 151):
+                ring.appendleft({"payload": f"m{i}"})        # how on_message stores
+            app.topics["iot/k"] = {"count": 150, "last": 1.0, "channel": None,
+                                   "kind": "broadcast", "messages": ring}
+
+    def tearDown(self):
+        with app.lock:
+            app.topics.clear(); app.topics.update(self.saved[0])
+            app.PER_TOPIC = self.saved[1]
+
+    def test_the_newest_are_kept(self):
+        r = app.app.test_client().post("/api/keep", json={"keep": 100})
+        self.assertTrue(r.get_json()["ok"])
+        kept = [m["payload"] for m in app.topics["iot/k"]["messages"]]
+        self.assertEqual(len(kept), 100)
+        self.assertEqual((kept[0], kept[-1]), ("m150", "m51"))
+
+
+class TheRetainedTagFollowsTheRetainedValue(unittest.TestCase):
+    """The tag marks the topic's one retained value - the newest message
+    published with RETAIN, while the topic holds one - and moves when a newer
+    retained publish arrives. It was the newest arrival's delivery flag, which
+    MQTT clears on a live delivery: a retained publish made after the viewer
+    connected arrived untagged and the tag stayed on the replayed message."""
+
+    def setUp(self):
+        with app.lock:
+            self.saved = (dict(app.topics), dict(app.retained), dict(app.channels))
+            app.topics.clear(); app.retained.clear(); app.channels.clear()
+            app.channels["$broadcast"] = ("append", "#")
+            ring = collections.deque(maxlen=25)
+            for payload, flag in [("v1", True), ("plain", False), ("v2", True), ("later", False)]:
+                ring.appendleft({"payload": payload, "retained": flag, "offset": None})
+            app.topics["abc/def"] = {"count": 4, "last": 1.0, "channel": "$broadcast",
+                                     "kind": "broadcast", "messages": ring}
+            app.retained["abc/def"] = {"topic": "abc/def"}
+
+    def tearDown(self):
+        with app.lock:
+            for d, old in zip((app.topics, app.retained, app.channels), self.saved):
+                d.clear(); d.update(old)
+
+    def tags(self):
+        body = app.app.test_client().get("/api/messages?topic=abc/def").get_json()
+        return [(m["payload"], m["retained"]) for m in body["messages"]]
+
+    def tree_tag(self):
+        rows = app.app.test_client().get("/api/tree").get_json()
+        return next(r["retained"] for r in rows if r["topic"] == "abc/def")
+
+    def test_only_the_newest_retained_publish_is_tagged(self):
+        self.assertEqual(self.tags(), [("later", False), ("v2", True),
+                                       ("plain", False), ("v1", False)])
+
+    def test_the_tree_tag_survives_a_later_plain_publish(self):
+        self.assertTrue(self.tree_tag())
+
+    def test_a_cleared_value_tags_nothing(self):
+        with app.lock:
+            app.retained.clear()
+        self.assertEqual([t for _, t in self.tags()], [False] * 4)
+        self.assertFalse(self.tree_tag())
+
+    def test_the_store_itself_is_not_rewritten(self):
+        self.tags()
+        self.assertTrue(app.topics["abc/def"]["messages"][3]["retained"])  # v1 kept as it came
+
+
+class TheSubscriptionAsksForRetainAsPublished(unittest.TestCase):
+    """Without it a retained publish reaching a live subscription carries
+    RETAIN = 0, and the page cannot tell it from a plain one."""
+
+    def subscribe_calls(self, protocol):
+        client = unittest.mock.MagicMock()
+        client.subscribe.return_value = (0, 1)
+        with unittest.mock.patch.object(app, "PROTOCOL", protocol), \
+                unittest.mock.patch.dict(app.MQTT_CFG, {"subscribe": "#"}):
+            app.on_connect(client, None, None, 0)
+        return [c for c in client.subscribe.call_args_list if c.args[0] == "#"]
+
+    def test_mqtt5_asks_for_it(self):
+        (call,) = self.subscribe_calls(app.mqtt.MQTTv5)
+        opts = call.kwargs["options"]
+        self.assertTrue(opts.retainAsPublished)
+        self.assertEqual(opts.QoS, 1)
+
+    def test_mqtt311_cannot_and_does_not(self):
+        (call,) = self.subscribe_calls(app.mqtt.MQTTv311)
+        self.assertEqual(call.kwargs, {"qos": 1})
